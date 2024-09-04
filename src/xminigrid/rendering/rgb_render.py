@@ -181,8 +181,12 @@ TILES_FN_MAP = {
 
 
 # TODO: add highlight for can_see_through_walls=Fasle
-def get_highlight_mask(grid: np.ndarray, agent: AgentState | None, view_size: int) -> np.ndarray:
-    mask = np.zeros((grid.shape[0] + 2 * view_size, grid.shape[1] + 2 * view_size), dtype=np.bool_)
+def get_highlight_mask(
+    grid: np.ndarray, agent: AgentState | None, view_size: int
+) -> np.ndarray:
+    mask = np.zeros(
+        (grid.shape[0] + 2 * view_size, grid.shape[1] + 2 * view_size), dtype=np.bool_
+    )
     if agent is None:
         return mask
 
@@ -207,9 +211,15 @@ def get_highlight_mask(grid: np.ndarray, agent: AgentState | None, view_size: in
 
 @functools.cache
 def render_tile(
-    tile: tuple, agent_direction: int | None = None, highlight: bool = False, tile_size: int = 32, subdivs: int = 3
+    tile: tuple,
+    agent_direction: int | None = None,
+    highlight: bool = False,
+    tile_size: int = 32,
+    subdivs: int = 3,
 ) -> np.ndarray:
-    img = np.full((tile_size * subdivs, tile_size * subdivs, 3), dtype=np.uint8, fill_value=255)
+    img = np.full(
+        (tile_size * subdivs, tile_size * subdivs, 3), dtype=np.uint8, fill_value=255
+    )
     # draw tile
     TILES_FN_MAP[tile[0]](img, tile[1])
     # draw agent if on this tile

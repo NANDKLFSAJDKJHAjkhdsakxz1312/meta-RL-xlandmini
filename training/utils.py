@@ -30,7 +30,11 @@ def calculate_gae(
     # single iteration for the loop
     def _get_advantages(gae_and_next_value, transition):
         gae, next_value = gae_and_next_value
-        delta = transition.reward + gamma * next_value * (1 - transition.done) - transition.value
+        delta = (
+            transition.reward
+            + gamma * next_value * (1 - transition.done)
+            - transition.value
+        )
         gae = delta + gamma * gae_lambda * (1 - transition.done) * gae
         return (gae, transition.value), gae
 
@@ -73,7 +77,9 @@ def ppo_update_networks(
         log_prob = dist.log_prob(transitions.action)
 
         # CALCULATE VALUE LOSS
-        value_pred_clipped = transitions.value + (value - transitions.value).clip(-clip_eps, clip_eps)
+        value_pred_clipped = transitions.value + (value - transitions.value).clip(
+            -clip_eps, clip_eps
+        )
         value_loss = jnp.square(value - targets)
         value_loss_clipped = jnp.square(value_pred_clipped - targets)
         value_loss = 0.5 * jnp.maximum(value_loss, value_loss_clipped).mean()
@@ -90,8 +96,12 @@ def ppo_update_networks(
         total_loss = actor_loss + vf_coef * value_loss - ent_coef * entropy
         return total_loss, (value_loss, actor_loss, entropy)
 
-    (loss, (vloss, aloss, entropy)), grads = jax.value_and_grad(_loss_fn, has_aux=True)(train_state.params)
-    (loss, vloss, aloss, entropy, grads) = jax.lax.pmean((loss, vloss, aloss, entropy, grads), axis_name="devices")
+    (loss, (vloss, aloss, entropy)), grads = jax.value_and_grad(_loss_fn, has_aux=True)(
+        train_state.params
+    )
+    (loss, vloss, aloss, entropy, grads) = jax.lax.pmean(
+        (loss, vloss, aloss, entropy, grads), axis_name="devices"
+    )
     train_state = train_state.apply_gradients(grads=grads)
     update_info = {
         "total_loss": loss,

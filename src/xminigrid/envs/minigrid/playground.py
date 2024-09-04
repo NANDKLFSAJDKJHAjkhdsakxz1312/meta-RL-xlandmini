@@ -6,7 +6,12 @@ from flax import struct
 
 from ...core.constants import Colors, Tiles
 from ...core.goals import EmptyGoal
-from ...core.grid import cartesian_product_1d, nine_rooms, sample_coordinates, sample_direction
+from ...core.grid import (
+    cartesian_product_1d,
+    nine_rooms,
+    sample_coordinates,
+    sample_direction,
+)
 from ...core.rules import EmptyRule
 from ...environment import Environment, EnvParams
 from ...types import AgentState, EnvCarry, State
@@ -32,7 +37,18 @@ _allowed_doors = cartesian_product_1d(
     _allowed_colors,
 )
 _allowed_objects = cartesian_product_1d(
-    jnp.array((Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX, Tiles.GOAL), dtype=jnp.uint8),
+    jnp.array(
+        (
+            Tiles.BALL,
+            Tiles.SQUARE,
+            Tiles.PYRAMID,
+            Tiles.KEY,
+            Tiles.STAR,
+            Tiles.HEX,
+            Tiles.GOAL,
+        ),
+        dtype=jnp.uint8,
+    ),
     _allowed_colors,
 )
 # number of doors with 9 rooms
@@ -53,14 +69,18 @@ class Playground(Environment[PlaygroundEnvParams, EnvCarry]):
             params = params.replace(max_steps=512)
         return params
 
-    def _generate_problem(self, params: PlaygroundEnvParams, key: jax.Array) -> State[EnvCarry]:
+    def _generate_problem(
+        self, params: PlaygroundEnvParams, key: jax.Array
+    ) -> State[EnvCarry]:
         key, *keys = jax.random.split(key, num=6)
 
         grid = nine_rooms(params.height, params.width)
         roomW, roomH = params.width // 3, params.height // 3
 
         # assuming that rooms are square!
-        door_coords = jax.random.randint(keys[0], shape=(_total_doors,), minval=1, maxval=roomW)
+        door_coords = jax.random.randint(
+            keys[0], shape=(_total_doors,), minval=1, maxval=roomW
+        )
         doors = jax.random.choice(keys[1], _allowed_doors, shape=(_total_doors,))
 
         # adapted from minigrid playground
@@ -81,11 +101,15 @@ class Playground(Environment[PlaygroundEnvParams, EnvCarry]):
                     door_idx = door_idx + 1
 
         objects_coords = sample_coordinates(keys[2], grid, num=params.num_objects + 1)
-        objects = jax.random.choice(keys[3], _allowed_objects, shape=(params.num_objects,))
+        objects = jax.random.choice(
+            keys[3], _allowed_objects, shape=(params.num_objects,)
+        )
         for i in range(params.num_objects):
             grid = grid.at[objects_coords[i][0], objects_coords[i][1]].set(objects[i])
 
-        agent = AgentState(position=objects_coords[-1], direction=sample_direction(keys[4]))
+        agent = AgentState(
+            position=objects_coords[-1], direction=sample_direction(keys[4])
+        )
 
         state = State(
             key=key,

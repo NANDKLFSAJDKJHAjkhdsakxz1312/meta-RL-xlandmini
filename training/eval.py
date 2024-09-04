@@ -33,7 +33,11 @@ def main():
         head_hidden_dim=config["head_hidden_dim"],
     )
     # jitting all functions
-    apply_fn, reset_fn, step_fn = jax.jit(model.apply), jax.jit(env.reset), jax.jit(env.step)
+    apply_fn, reset_fn, step_fn = (
+        jax.jit(model.apply),
+        jax.jit(env.reset),
+        jax.jit(env.step),
+    )
 
     # initial inputs
     prev_reward = jnp.asarray(0)

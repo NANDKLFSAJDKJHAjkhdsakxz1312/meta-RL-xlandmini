@@ -13,13 +13,21 @@ from ..core.constants import NUM_COLORS, NUM_LAYERS, TILES_REGISTRY
 from ..rendering.rgb_render import render_tile
 from ..wrappers import Wrapper
 
-CACHE_PATH = os.environ.get("XLAND_MINIGRID_CACHE", os.path.expanduser("~/.xland_minigrid"))
+CACHE_PATH = os.environ.get(
+    "XLAND_MINIGRID_CACHE", os.path.expanduser("~/.xland_minigrid")
+)
 FORCE_RELOAD = os.environ.get("XLAND_MINIGRID_RELOAD_CACHE", False)
 
 
-def build_cache(tiles: np.ndarray, tile_size: int = 32) -> tuple[np.ndarray, np.ndarray]:
-    cache = np.zeros((tiles.shape[0], tiles.shape[1], tile_size, tile_size, 3), dtype=np.uint8)
-    agent_cache = np.zeros((tiles.shape[0], tiles.shape[1], tile_size, tile_size, 3), dtype=np.uint8)
+def build_cache(
+    tiles: np.ndarray, tile_size: int = 32
+) -> tuple[np.ndarray, np.ndarray]:
+    cache = np.zeros(
+        (tiles.shape[0], tiles.shape[1], tile_size, tile_size, 3), dtype=np.uint8
+    )
+    agent_cache = np.zeros(
+        (tiles.shape[0], tiles.shape[1], tile_size, tile_size, 3), dtype=np.uint8
+    )
 
     for y in range(tiles.shape[0]):
         for x in range(tiles.shape[1]):
@@ -52,12 +60,20 @@ cache_path = os.path.join(CACHE_PATH, "render_cache")
 if not os.path.exists(cache_path) or FORCE_RELOAD:
     os.makedirs(CACHE_PATH, exist_ok=True)
     print("Building rendering cache, may take a while...")
-    TILE_CACHE, TILE_W_AGENT_CACHE = build_cache(np.asarray(TILES_REGISTRY), tile_size=TILE_SIZE)
+    TILE_CACHE, TILE_W_AGENT_CACHE = build_cache(
+        np.asarray(TILES_REGISTRY), tile_size=TILE_SIZE
+    )
     TILE_CACHE = jnp.asarray(TILE_CACHE).reshape(-1, TILE_SIZE, TILE_SIZE, 3)
-    TILE_W_AGENT_CACHE = jnp.asarray(TILE_W_AGENT_CACHE).reshape(-1, TILE_SIZE, TILE_SIZE, 3)
+    TILE_W_AGENT_CACHE = jnp.asarray(TILE_W_AGENT_CACHE).reshape(
+        -1, TILE_SIZE, TILE_SIZE, 3
+    )
 
-    print(f"Done. Cache is saved to {cache_path} and will be reused on consequent runs.")
-    save_bz2_pickle({"tile_cache": TILE_CACHE, "tile_agent_cache": TILE_W_AGENT_CACHE}, cache_path)
+    print(
+        f"Done. Cache is saved to {cache_path} and will be reused on consequent runs."
+    )
+    save_bz2_pickle(
+        {"tile_cache": TILE_CACHE, "tile_agent_cache": TILE_W_AGENT_CACHE}, cache_path
+    )
 
 TILE_CACHE = load_bz2_pickle(cache_path)["tile_cache"]
 TILE_W_AGENT_CACHE = load_bz2_pickle(cache_path)["tile_agent_cache"]
@@ -75,7 +91,9 @@ def _render_obs(obs: jax.Array) -> jax.Array:
     agent_tile = TILE_W_AGENT_CACHE[obs_flat_idxs[view_size - 1, view_size // 2]]
     rendered_obs = rendered_obs.at[view_size - 1, view_size // 2].set(agent_tile)
     # [view_size, view_size, tile_size, tile_size, 3] -> [view_size * tile_size, view_size * tile_size, 3]
-    rendered_obs = rendered_obs.transpose((0, 2, 1, 3, 4)).reshape(view_size * TILE_SIZE, view_size * TILE_SIZE, 3)
+    rendered_obs = rendered_obs.transpose((0, 2, 1, 3, 4)).reshape(
+        view_size * TILE_SIZE, view_size * TILE_SIZE, 3
+    )
 
     return rendered_obs
 
@@ -96,7 +114,10 @@ class RGBImgObservationWrapper(Wrapper):
     def __convert_obs(self, timestep):
         if isinstance(timestep.observation, dict):
             assert "img" in timestep.observation
-            rendered_obs = {**timestep.observation, **{"img": _render_obs(timestep.observation["img"])}}
+            rendered_obs = {
+                **timestep.observation,
+                **{"img": _render_obs(timestep.observation["img"])},
+            }
         else:
             rendered_obs = _render_obs(timestep.observation)
 

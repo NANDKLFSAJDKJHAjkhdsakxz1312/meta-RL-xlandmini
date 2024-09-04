@@ -43,12 +43,16 @@ _allowed_colors = jnp.array(
 
 # helper functions to generate various maps, inspired by the common minigrid layouts
 # TODO: all worlds should be square
-def generate_room(key: jax.Array, height: int, width: int) -> tuple[jax.Array, GridState]:
+def generate_room(
+    key: jax.Array, height: int, width: int
+) -> tuple[jax.Array, GridState]:
     grid = room(height, width)
     return key, grid
 
 
-def generate_two_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Array, GridState]:
+def generate_two_rooms(
+    key: jax.Array, height: int, width: int
+) -> tuple[jax.Array, GridState]:
     key, color_key, door_key = jax.random.split(key, num=3)
 
     color = jax.random.choice(color_key, _allowed_colors)
@@ -60,22 +64,36 @@ def generate_two_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Arr
     return key, grid
 
 
-def generate_four_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Array, GridState]:
+def generate_four_rooms(
+    key: jax.Array, height: int, width: int
+) -> tuple[jax.Array, GridState]:
     key, doors_key, colors_key = jax.random.split(key, num=3)
 
-    doors_offsets = jax.random.randint(doors_key, shape=(4,), minval=1, maxval=height // 2)
+    doors_offsets = jax.random.randint(
+        doors_key, shape=(4,), minval=1, maxval=height // 2
+    )
     colors = jax.random.choice(colors_key, _allowed_colors, shape=(4,))
 
     grid = four_rooms(height, width)
-    grid = grid.at[height // 2, doors_offsets[0]].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[0]])
-    grid = grid.at[height // 2, width // 2 + doors_offsets[1]].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[1]])
-    grid = grid.at[doors_offsets[2], width // 2].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[2]])
-    grid = grid.at[height // 2 + doors_offsets[3], width // 2].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[3]])
+    grid = grid.at[height // 2, doors_offsets[0]].set(
+        TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[0]]
+    )
+    grid = grid.at[height // 2, width // 2 + doors_offsets[1]].set(
+        TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[1]]
+    )
+    grid = grid.at[doors_offsets[2], width // 2].set(
+        TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[2]]
+    )
+    grid = grid.at[height // 2 + doors_offsets[3], width // 2].set(
+        TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[3]]
+    )
 
     return key, grid
 
 
-def generate_six_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Array, GridState]:
+def generate_six_rooms(
+    key: jax.Array, height: int, width: int
+) -> tuple[jax.Array, GridState]:
     key, colors_key = jax.random.split(key)
 
     grid = room(height, width)
@@ -84,7 +102,9 @@ def generate_six_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Arr
 
     for i in range(1, 3):
         grid = horizontal_line(grid, 0, i * (height // 3), width // 2 - 2, _wall_tile)
-        grid = horizontal_line(grid, width // 2 + 2, i * (height // 3), width // 2 - 2, _wall_tile)
+        grid = horizontal_line(
+            grid, width // 2 + 2, i * (height // 3), width // 2 - 2, _wall_tile
+        )
 
     doors_idxs = (
         # left doors
@@ -99,12 +119,16 @@ def generate_six_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Arr
     colors = jax.random.choice(colors_key, _allowed_colors, shape=(6,))
 
     for i in range(6):
-        grid = grid.at[doors_idxs[i][0], doors_idxs[i][1]].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[i]])
+        grid = grid.at[doors_idxs[i][0], doors_idxs[i][1]].set(
+            TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[i]]
+        )
 
     return key, grid
 
 
-def generate_nine_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Array, GridState]:
+def generate_nine_rooms(
+    key: jax.Array, height: int, width: int
+) -> tuple[jax.Array, GridState]:
     # valid sizes should follow 3 * x + 4: 7, 10, 13, 16, 19, 22, 25, 28, 31, ...
     # (size - 4) % 3 == 0
     key, doors_key, colors_key = jax.random.split(key, num=3)
@@ -125,11 +149,15 @@ def generate_nine_rooms(key: jax.Array, height: int, width: int) -> tuple[jax.Ar
             yB = yT + roomH
 
             if i + 1 < 3:
-                grid = grid.at[yT + door_coords[door_idx], xR].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[door_idx]])
+                grid = grid.at[yT + door_coords[door_idx], xR].set(
+                    TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[door_idx]]
+                )
                 door_idx = door_idx + 1
 
             if j + 1 < 3:
-                grid = grid.at[yB, xL + door_coords[door_idx]].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[door_idx]])
+                grid = grid.at[yB, xL + door_coords[door_idx]].set(
+                    TILES_REGISTRY[Tiles.DOOR_CLOSED, colors[door_idx]]
+                )
                 door_idx = door_idx + 1
 
     return key, grid
@@ -154,7 +182,9 @@ class XLandMiniGrid(Environment[XLandEnvParams, EnvCarry]):
             params = params.replace(max_steps=3 * (params.height * params.width))
         return params
 
-    def _generate_problem(self, params: XLandEnvParams, key: jax.Array) -> State[EnvCarry]:
+    def _generate_problem(
+        self, params: XLandEnvParams, key: jax.Array
+    ) -> State[EnvCarry]:
         # WARN: we can make this compatible with jit (to vmap on different layouts during training),
         # but it will probably be very costly, as lax.switch will generate all layouts during reset under vmap
         # TODO: experiment with this under jit, does it possible to make it jit-compatible without overhead?
@@ -170,7 +200,9 @@ class XLandMiniGrid(Environment[XLandEnvParams, EnvCarry]):
             key, grid = generate_nine_rooms(key, params.height, params.width)
         else:
             # WARN: will not work under jit!
-            raise RuntimeError('Unknown grid type, should be one of: ["R1", "R2", "R4", "R6", "R9"]')
+            raise RuntimeError(
+                'Unknown grid type, should be one of: ["R1", "R2", "R4", "R6", "R9"]'
+            )
 
         num_objects = len(params.ruleset.init_tiles)
         objects = params.ruleset.init_tiles

@@ -39,7 +39,15 @@ class LockedRoom(Environment[EnvParams, EnvCarry]):
         return params
 
     def _generate_problem(self, params: EnvParams, key: jax.Array) -> State[EnvCarry]:
-        key, rooms_key, colors_key, objects_key, coords_key, agent_pos_key, agent_dir_key = jax.random.split(key, num=7)
+        (
+            key,
+            rooms_key,
+            colors_key,
+            objects_key,
+            coords_key,
+            agent_pos_key,
+            agent_dir_key,
+        ) = jax.random.split(key, num=7)
 
         # set up rooms
         grid = room(params.height, params.width)
@@ -47,9 +55,15 @@ class LockedRoom(Environment[EnvParams, EnvCarry]):
         grid = vertical_line(grid, params.width // 2 + 2, 0, params.height, _wall_tile)
 
         for i in range(1, 3):
-            grid = horizontal_line(grid, 0, i * (params.height // 3), params.width // 2 - 2, _wall_tile)
             grid = horizontal_line(
-                grid, params.width // 2 + 2, i * (params.height // 3), params.width // 2 - 2, _wall_tile
+                grid, 0, i * (params.height // 3), params.width // 2 - 2, _wall_tile
+            )
+            grid = horizontal_line(
+                grid,
+                params.width // 2 + 2,
+                i * (params.height // 3),
+                params.width // 2 - 2,
+                _wall_tile,
             )
 
         # hardcoded, but easier and faster to sample
@@ -78,7 +92,9 @@ class LockedRoom(Environment[EnvParams, EnvCarry]):
         colors_order = jax.random.permutation(colors_key, _allowed_colors)
 
         for i in range(6):
-            grid = grid.at[doors_idxs[i][0], doors_idxs[i][1]].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, colors_order[i]])
+            grid = grid.at[doors_idxs[i][0], doors_idxs[i][1]].set(
+                TILES_REGISTRY[Tiles.DOOR_CLOSED, colors_order[i]]
+            )
 
         goal_idx, key_idx = jax.random.choice(rooms_key, 6, shape=(2,), replace=False)
         coords = jax.random.randint(
@@ -93,13 +109,15 @@ class LockedRoom(Environment[EnvParams, EnvCarry]):
         grid = grid.at[doors_idxs[goal_idx][0], doors_idxs[goal_idx][1]].set(
             TILES_REGISTRY[Tiles.DOOR_LOCKED, target_color]
         )
-        grid = grid.at[room_corners[goal_idx][0] + coords[0][0], room_corners[goal_idx][1] + coords[0][1]].set(
-            TILES_REGISTRY[Tiles.GOAL, Colors.GREEN]
-        )
+        grid = grid.at[
+            room_corners[goal_idx][0] + coords[0][0],
+            room_corners[goal_idx][1] + coords[0][1],
+        ].set(TILES_REGISTRY[Tiles.GOAL, Colors.GREEN])
         # place key
-        grid = grid.at[room_corners[key_idx][0] + coords[1][0], room_corners[key_idx][1] + coords[1][1]].set(
-            TILES_REGISTRY[Tiles.KEY, target_color]
-        )
+        grid = grid.at[
+            room_corners[key_idx][0] + coords[1][0],
+            room_corners[key_idx][1] + coords[1][1],
+        ].set(TILES_REGISTRY[Tiles.KEY, target_color])
 
         # sample agent position
         position = jax.random.randint(

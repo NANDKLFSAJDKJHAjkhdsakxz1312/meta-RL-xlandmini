@@ -32,15 +32,23 @@ class FourRooms(Environment[EnvParams, EnvCarry]):
 
         black_floor = TILES_REGISTRY[Tiles.FLOOR, Colors.BLACK]
         # sampling doors positions
-        doors_offsets = jax.random.randint(keys[0], shape=(4,), minval=1, maxval=params.height // 2)
+        doors_offsets = jax.random.randint(
+            keys[0], shape=(4,), minval=1, maxval=params.height // 2
+        )
         grid = grid.at[params.height // 2, doors_offsets[0]].set(black_floor)
-        grid = grid.at[params.height // 2, params.width // 2 + doors_offsets[1]].set(black_floor)
+        grid = grid.at[params.height // 2, params.width // 2 + doors_offsets[1]].set(
+            black_floor
+        )
         grid = grid.at[doors_offsets[2], params.width // 2].set(black_floor)
-        grid = grid.at[params.height // 2 + doors_offsets[3], params.width // 2].set(black_floor)
+        grid = grid.at[params.height // 2 + doors_offsets[3], params.width // 2].set(
+            black_floor
+        )
 
         # sampling agent and goal positions
         goal_coords, agent_coords = sample_coordinates(keys[1], grid, num=2)
-        grid = grid.at[goal_coords[0], goal_coords[1]].set(TILES_REGISTRY[Tiles.GOAL, Colors.GREEN])
+        grid = grid.at[goal_coords[0], goal_coords[1]].set(
+            TILES_REGISTRY[Tiles.GOAL, Colors.GREEN]
+        )
 
         agent = AgentState(position=agent_coords, direction=sample_direction(keys[2]))
         state = State(

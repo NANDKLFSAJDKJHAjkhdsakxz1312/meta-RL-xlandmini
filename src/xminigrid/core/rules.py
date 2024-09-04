@@ -18,7 +18,11 @@ NUM_RULES = 12
 # In general, we need a way to select specific function/class based on ID number.
 # We can not just decode without evaluation, as then return type will be different between branches
 def check_rule(
-    encodings: jax.Array, grid: GridState, agent: AgentState, action: int | jax.Array, position: jax.Array
+    encodings: jax.Array,
+    grid: GridState,
+    agent: AgentState,
+    action: int | jax.Array,
+    position: jax.Array,
 ) -> tuple[GridState, AgentState]:
     def _check(carry, encoding):
         grid, agent = carry
@@ -32,13 +36,25 @@ def check_rule(
                 lambda: TileNearRule.decode(encoding)(grid, agent, action, position),
                 # rules for the extended benchmarks
                 lambda: TileNearUpRule.decode(encoding)(grid, agent, action, position),
-                lambda: TileNearRightRule.decode(encoding)(grid, agent, action, position),
-                lambda: TileNearDownRule.decode(encoding)(grid, agent, action, position),
-                lambda: TileNearLeftRule.decode(encoding)(grid, agent, action, position),
+                lambda: TileNearRightRule.decode(encoding)(
+                    grid, agent, action, position
+                ),
+                lambda: TileNearDownRule.decode(encoding)(
+                    grid, agent, action, position
+                ),
+                lambda: TileNearLeftRule.decode(encoding)(
+                    grid, agent, action, position
+                ),
                 lambda: AgentNearUpRule.decode(encoding)(grid, agent, action, position),
-                lambda: AgentNearRightRule.decode(encoding)(grid, agent, action, position),
-                lambda: AgentNearDownRule.decode(encoding)(grid, agent, action, position),
-                lambda: AgentNearLeftRule.decode(encoding)(grid, agent, action, position),
+                lambda: AgentNearRightRule.decode(encoding)(
+                    grid, agent, action, position
+                ),
+                lambda: AgentNearDownRule.decode(encoding)(
+                    grid, agent, action, position
+                ),
+                lambda: AgentNearLeftRule.decode(encoding)(
+                    grid, agent, action, position
+                ),
             ),
         )
         return (grid, agent), None
@@ -51,18 +67,19 @@ def check_rule(
 class BaseRule(struct.PyTreeNode):
     @abc.abstractmethod
     def __call__(
-        self, grid: GridState, agent: AgentState, action: int | jax.Array, position: jax.Array
-    ) -> tuple[GridState, AgentState]:
-        ...
+        self,
+        grid: GridState,
+        agent: AgentState,
+        action: int | jax.Array,
+        position: jax.Array,
+    ) -> tuple[GridState, AgentState]: ...
 
     @classmethod
     @abc.abstractmethod
-    def decode(cls, encoding: jax.Array) -> BaseRule:
-        ...
+    def decode(cls, encoding: jax.Array) -> BaseRule: ...
 
     @abc.abstractmethod
-    def encode(self) -> jax.Array:
-        ...
+    def encode(self) -> jax.Array: ...
 
 
 # TODO: checks on only some actions can produce bugs, but it is faster. If it's going to cause trouble, reconsider.
@@ -105,7 +122,9 @@ class AgentHoldRule(BaseRule):
         return cls(tile=encoding[1:3], prod_tile=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(1), self.tile, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(1), self.tile, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -118,10 +137,18 @@ class AgentNearRule(BaseRule):
             y, x = agent.position
             up, right, down, left = get_neighbouring_tiles(grid, y, x)
 
-            grid = jax.lax.select(equal(up, self.tile), grid.at[y - 1, x].set(self.prod_tile), grid)
-            grid = jax.lax.select(equal(right, self.tile), grid.at[y, x + 1].set(self.prod_tile), grid)
-            grid = jax.lax.select(equal(down, self.tile), grid.at[y + 1, x].set(self.prod_tile), grid)
-            grid = jax.lax.select(equal(left, self.tile), grid.at[y, x - 1].set(self.prod_tile), grid)
+            grid = jax.lax.select(
+                equal(up, self.tile), grid.at[y - 1, x].set(self.prod_tile), grid
+            )
+            grid = jax.lax.select(
+                equal(right, self.tile), grid.at[y, x + 1].set(self.prod_tile), grid
+            )
+            grid = jax.lax.select(
+                equal(down, self.tile), grid.at[y + 1, x].set(self.prod_tile), grid
+            )
+            grid = jax.lax.select(
+                equal(left, self.tile), grid.at[y, x - 1].set(self.prod_tile), grid
+            )
             return grid
 
         grid = jax.lax.cond(
@@ -136,7 +163,9 @@ class AgentNearRule(BaseRule):
         return cls(tile=encoding[1:3], prod_tile=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(2), self.tile, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(2), self.tile, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -156,29 +185,34 @@ class TileNearRule(BaseRule):
             up, right, down, left = get_neighbouring_tiles(grid, y, x)
 
             grid = jax.lax.select(
-                (equal(tile, tile_a) & equal(up, tile_b)) | (equal(tile, tile_b) & equal(up, tile_a)),
+                (equal(tile, tile_a) & equal(up, tile_b))
+                | (equal(tile, tile_b) & equal(up, tile_a)),
                 grid.at[y - 1, x].set(self.prod_tile).at[y, x].set(floor_tile),
                 grid,
             )
             grid = jax.lax.select(
-                (equal(tile, tile_a) & equal(right, tile_b)) | (equal(tile, tile_b) & equal(right, tile_a)),
+                (equal(tile, tile_a) & equal(right, tile_b))
+                | (equal(tile, tile_b) & equal(right, tile_a)),
                 grid.at[y, x + 1].set(self.prod_tile).at[y, x].set(floor_tile),
                 grid,
             )
             grid = jax.lax.select(
-                (equal(tile, tile_a) & equal(down, tile_b)) | (equal(tile, tile_b) & equal(down, tile_a)),
+                (equal(tile, tile_a) & equal(down, tile_b))
+                | (equal(tile, tile_b) & equal(down, tile_a)),
                 grid.at[y + 1, x].set(self.prod_tile).at[y, x].set(floor_tile),
                 grid,
             )
             grid = jax.lax.select(
-                (equal(tile, tile_a) & equal(left, tile_b)) | (equal(tile, tile_b) & equal(left, tile_a)),
+                (equal(tile, tile_a) & equal(left, tile_b))
+                | (equal(tile, tile_b) & equal(left, tile_a)),
                 grid.at[y, x - 1].set(self.prod_tile).at[y, x].set(floor_tile),
                 grid,
             )
             return grid
 
         grid = jax.lax.cond(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             lambda: _rule_fn(grid),
             lambda: grid,
         )
@@ -189,7 +223,9 @@ class TileNearRule(BaseRule):
         return cls(tile_a=encoding[1:3], tile_b=encoding[3:5], prod_tile=encoding[5:7])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(3), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(3), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -220,7 +256,8 @@ class TileNearUpRule(BaseRule):
             return grid
 
         grid = jax.lax.cond(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             lambda: _rule_fn(grid),
             lambda: grid,
         )
@@ -231,7 +268,9 @@ class TileNearUpRule(BaseRule):
         return cls(tile_a=encoding[1:3], tile_b=encoding[3:5], prod_tile=encoding[5:7])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(4), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(4), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -262,7 +301,8 @@ class TileNearRightRule(BaseRule):
             return grid
 
         grid = jax.lax.cond(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             lambda: _rule_fn(grid),
             lambda: grid,
         )
@@ -273,7 +313,9 @@ class TileNearRightRule(BaseRule):
         return cls(tile_a=encoding[1:3], tile_b=encoding[3:5], prod_tile=encoding[5:7])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(5), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(5), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -303,7 +345,8 @@ class TileNearDownRule(BaseRule):
             return grid
 
         grid = jax.lax.cond(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             lambda: _rule_fn(grid),
             lambda: grid,
         )
@@ -314,7 +357,9 @@ class TileNearDownRule(BaseRule):
         return cls(tile_a=encoding[1:3], tile_b=encoding[3:5], prod_tile=encoding[5:7])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(6), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(6), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -344,7 +389,8 @@ class TileNearLeftRule(BaseRule):
             return grid
 
         grid = jax.lax.cond(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             lambda: _rule_fn(grid),
             lambda: grid,
         )
@@ -355,7 +401,9 @@ class TileNearLeftRule(BaseRule):
         return cls(tile_a=encoding[1:3], tile_b=encoding[3:5], prod_tile=encoding[5:7])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(7), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(7), self.tile_a, self.tile_b, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -386,7 +434,9 @@ class AgentNearUpRule(BaseRule):
         return cls(tile=encoding[1:3], prod_tile=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(8), self.tile, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(8), self.tile, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -417,7 +467,9 @@ class AgentNearRightRule(BaseRule):
         return cls(tile=encoding[1:3], prod_tile=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(9), self.tile, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(9), self.tile, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -448,7 +500,9 @@ class AgentNearDownRule(BaseRule):
         return cls(tile=encoding[1:3], prod_tile=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(10), self.tile, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(10), self.tile, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)
 
 
@@ -479,5 +533,7 @@ class AgentNearLeftRule(BaseRule):
         return cls(tile=encoding[1:3], prod_tile=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(11), self.tile, self.prod_tile], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(11), self.tile, self.prod_tile], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_RULE_ENCODING_LEN)

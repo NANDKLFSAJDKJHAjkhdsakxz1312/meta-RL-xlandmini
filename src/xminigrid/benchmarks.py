@@ -15,7 +15,9 @@ from tqdm.auto import tqdm
 from .types import RuleSet
 
 HF_REPO_ID = os.environ.get("XLAND_MINIGRID_HF_REPO_ID", "Howuhh/xland_minigrid")
-DATA_PATH = os.environ.get("XLAND_MINIGRID_DATA", os.path.expanduser("~/.xland_minigrid"))
+DATA_PATH = os.environ.get(
+    "XLAND_MINIGRID_DATA", os.path.expanduser("~/.xland_minigrid")
+)
 
 NAME2HFFILENAME = {
     "trivial-1m": "trivial_1m_v2",
@@ -42,7 +44,9 @@ class Benchmark(struct.PyTreeNode):
         return get_ruleset(self.goals, self.rules, self.init_tiles, ruleset_id)
 
     def sample_ruleset(self, key: jax.Array) -> RuleSet:
-        ruleset_id = jax.random.randint(key, shape=(), minval=0, maxval=self.num_rulesets())
+        ruleset_id = jax.random.randint(
+            key, shape=(), minval=0, maxval=self.num_rulesets()
+        )
         return self.get_ruleset(ruleset_id)
 
     def shuffle(self, key: jax.Array) -> Benchmark:
@@ -55,7 +59,9 @@ class Benchmark(struct.PyTreeNode):
         bench2 = jtu.tree_map(lambda a: a[idx:], self)
         return bench1, bench2
 
-    def filter_split(self, fn: Callable[[jax.Array, jax.Array], bool]) -> tuple[Benchmark, Benchmark]:
+    def filter_split(
+        self, fn: Callable[[jax.Array, jax.Array], bool]
+    ) -> tuple[Benchmark, Benchmark]:
         # fn(single_goal, single_rules) -> bool
         mask = jax.vmap(fn)(self.goals, self.rules)
         bench1 = jtu.tree_map(lambda a: a[mask], self)
@@ -123,7 +129,9 @@ def get_ruleset(
     return RuleSet(goal=goal, rules=rules, init_tiles=init_tiles)
 
 
-def save_bz2_pickle(ruleset: dict[str, jax.Array], path: str, protocol: int = -1) -> None:
+def save_bz2_pickle(
+    ruleset: dict[str, jax.Array], path: str, protocol: int = -1
+) -> None:
     with bz2.open(path, "wb") as f:
         pickle.dump(ruleset, f, protocol=protocol)
 

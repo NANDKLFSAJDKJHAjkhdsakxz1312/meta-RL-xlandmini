@@ -6,7 +6,9 @@ from .constants import Tiles
 from .grid import align_with_up, check_see_behind
 
 
-def crop_field_of_view(grid: GridState, agent: AgentState, height: int, width: int) -> jax.Array:
+def crop_field_of_view(
+    grid: GridState, agent: AgentState, height: int, width: int
+) -> jax.Array:
     # TODO: assert height and width are odd and >= 3
     # TODO: in theory we don't need padding from all 4 sides, only for out of bounds sides
     grid = jnp.pad(
@@ -33,7 +35,9 @@ def crop_field_of_view(grid: GridState, agent: AgentState, height: int, width: i
     return fov_crop
 
 
-def transparent_field_of_view(grid: GridState, agent: AgentState, height: int, width: int) -> jax.Array:
+def transparent_field_of_view(
+    grid: GridState, agent: AgentState, height: int, width: int
+) -> jax.Array:
     fov_grid = crop_field_of_view(grid, agent, height, width)
     fov_grid = align_with_up(fov_grid, agent.direction)
 
@@ -96,17 +100,25 @@ def generate_viz_mask_minigrid(grid: GridState) -> jax.Array:
         return (viz_mask, y), None
 
     def _main_body(viz_mask, y):
-        (viz_mask, _), _ = jax.lax.scan(f=_forward_body, init=(viz_mask, y), xs=jnp.arange(0, W - 1))
-        (viz_mask, _), _ = jax.lax.scan(f=_backward_body, init=(viz_mask, y), xs=jnp.arange(1, W), reverse=True)
+        (viz_mask, _), _ = jax.lax.scan(
+            f=_forward_body, init=(viz_mask, y), xs=jnp.arange(0, W - 1)
+        )
+        (viz_mask, _), _ = jax.lax.scan(
+            f=_backward_body, init=(viz_mask, y), xs=jnp.arange(1, W), reverse=True
+        )
         return viz_mask, None
 
-    viz_mask, _ = jax.lax.scan(f=_main_body, init=(viz_mask), xs=jnp.arange(0, H), reverse=True)
+    viz_mask, _ = jax.lax.scan(
+        f=_main_body, init=(viz_mask), xs=jnp.arange(0, H), reverse=True
+    )
 
     return viz_mask
 
 
 # TODO: works well with unroll=16 and random actions, but very slow with PPO even with high unroll!
-def minigrid_field_of_view(grid: GridState, agent: AgentState, height: int, width: int) -> jax.Array:
+def minigrid_field_of_view(
+    grid: GridState, agent: AgentState, height: int, width: int
+) -> jax.Array:
     fov_grid = crop_field_of_view(grid, agent, height, width)
     fov_grid = align_with_up(fov_grid, agent.direction)
     mask = generate_viz_mask_minigrid(fov_grid)

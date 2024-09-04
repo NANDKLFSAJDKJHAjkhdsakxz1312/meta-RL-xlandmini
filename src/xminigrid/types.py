@@ -25,11 +25,12 @@ EnvCarryT = TypeVar("EnvCarryT")
 class AgentState(struct.PyTreeNode):
     position: jax.Array = struct.field(default_factory=lambda: jnp.asarray((0, 0)))
     direction: jax.Array = struct.field(default_factory=lambda: jnp.asarray(0))
-    pocket: jax.Array = struct.field(default_factory=lambda: TILES_REGISTRY[Tiles.EMPTY, Colors.EMPTY])
+    pocket: jax.Array = struct.field(
+        default_factory=lambda: TILES_REGISTRY[Tiles.EMPTY, Colors.EMPTY]
+    )
 
 
-class EnvCarry(struct.PyTreeNode):
-    ...
+class EnvCarry(struct.PyTreeNode): ...
 
 
 class State(struct.PyTreeNode, Generic[EnvCarryT]):

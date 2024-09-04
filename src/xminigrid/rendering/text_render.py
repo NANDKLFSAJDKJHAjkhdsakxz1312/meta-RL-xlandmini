@@ -92,7 +92,9 @@ def _text_encode_goal(goal: list[int]) -> str:
     elif goal_id == 7:
         return f"TileNearUpGoal({_encode_tile(goal[1:3])}, {_encode_tile(goal[3:5])})"
     elif goal_id == 8:
-        return f"TileNearRightGoal({_encode_tile(goal[1:3])}, {_encode_tile(goal[3:5])})"
+        return (
+            f"TileNearRightGoal({_encode_tile(goal[1:3])}, {_encode_tile(goal[3:5])})"
+        )
     elif goal_id == 9:
         return f"TileNearDownGoal({_encode_tile(goal[1:3])}, {_encode_tile(goal[3:5])})"
     elif goal_id == 10:
@@ -126,13 +128,19 @@ def _text_encode_rule(rule: list[int]) -> str:
     elif rule_id == 7:
         return f"TileNearLeftRule({_encode_tile(rule[1:3])}, {_encode_tile(rule[3:5])}) -> {_encode_tile(rule[5:7])}"
     elif rule_id == 8:
-        return f"AgentNearUpRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
+        return (
+            f"AgentNearUpRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
+        )
     elif rule_id == 9:
         return f"AgentNearRightRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
     elif rule_id == 10:
-        return f"AgentNearDownRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
+        return (
+            f"AgentNearDownRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
+        )
     elif rule_id == 11:
-        return f"AgentNearLeftRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
+        return (
+            f"AgentNearLeftRule({_encode_tile(rule[1:3])}) -> {_encode_tile(rule[3:5])}"
+        )
     else:
         raise RuntimeError(f"Rendering: Unknown rule id: {rule_id}")
 

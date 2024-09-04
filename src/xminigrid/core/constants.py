@@ -46,7 +46,9 @@ TILES_REGISTRY = []
 for tile_id in range(NUM_TILES):
     for color_id in range(NUM_COLORS):
         TILES_REGISTRY.append((tile_id, color_id))
-TILES_REGISTRY = jnp.array(TILES_REGISTRY, dtype=jnp.uint8).reshape(NUM_TILES, NUM_COLORS, -1)
+TILES_REGISTRY = jnp.array(TILES_REGISTRY, dtype=jnp.uint8).reshape(
+    NUM_TILES, NUM_COLORS, -1
+)
 
 
 DIRECTIONS = jnp.array(

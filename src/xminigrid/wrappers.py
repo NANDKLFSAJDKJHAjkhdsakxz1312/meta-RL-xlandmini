@@ -21,7 +21,9 @@ class Wrapper(Environment[EnvParamsT, EnvCarryT]):
     def num_actions(self, params: EnvParamsT) -> int:
         return self._env.num_actions(params)
 
-    def observation_shape(self, params: EnvParamsT) -> tuple[int, int, int] | dict[str, Any]:
+    def observation_shape(
+        self, params: EnvParamsT
+    ) -> tuple[int, int, int] | dict[str, Any]:
         return self._env.observation_shape(params)
 
     def _generate_problem(self, params: EnvParamsT, key: jax.Array) -> State[EnvCarryT]:
@@ -30,7 +32,9 @@ class Wrapper(Environment[EnvParamsT, EnvCarryT]):
     def reset(self, params: EnvParamsT, key: jax.Array) -> TimeStep[EnvCarryT]:
         return self._env.reset(params, key)
 
-    def step(self, params: EnvParamsT, timestep: TimeStep[EnvCarryT], action: IntOrArray) -> TimeStep[EnvCarryT]:
+    def step(
+        self, params: EnvParamsT, timestep: TimeStep[EnvCarryT], action: IntOrArray
+    ) -> TimeStep[EnvCarryT]:
         return self._env.step(params, timestep, action)
 
     def render(self, params: EnvParamsT, timestep: TimeStep[EnvCarryT]):

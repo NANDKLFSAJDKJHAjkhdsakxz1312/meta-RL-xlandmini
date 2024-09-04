@@ -25,11 +25,15 @@ def register(
     **kwargs,
 ) -> None:
     if id in _REGISTRY:
-        raise ValueError("Environment with such id is already registered. Please choose another one.")
+        raise ValueError(
+            "Environment with such id is already registered. Please choose another one."
+        )
 
     if not id.startswith("XLand-MiniGrid"):
         if not id.startswith("MiniGrid"):
-            raise ValueError("Invalid id format. Should start from XLand-MiniGrid or MiniGrid.")
+            raise ValueError(
+                "Invalid id format. Should start from XLand-MiniGrid or MiniGrid."
+            )
 
     env_spec = EnvSpec(id=id, entry_point=entry_point, kwargs=kwargs)
     _REGISTRY[id] = env_spec
@@ -46,7 +50,9 @@ def load(name: str) -> Type[Environment]:
 # TODO: for example, Environment[CustomEnvParams, EnvCarry] or Environment[EnvParams, CustomEnvCarry]
 def make(id: str, **kwargs: Any) -> tuple[Environment, EnvParams]:
     if id not in _REGISTRY:
-        raise ValueError(f"Unregistered environment. Available environments: {', '.join(registered_environments())}")
+        raise ValueError(
+            f"Unregistered environment. Available environments: {', '.join(registered_environments())}"
+        )
 
     env_spec = _REGISTRY[id]
     env_constructor = load(env_spec.entry_point)

@@ -28,7 +28,9 @@ class Empty(Environment[EnvParams, EnvCarry]):
     def _generate_problem(self, params: EnvParams, key: jax.Array) -> State[EnvCarry]:
         grid = room(params.height, params.width)
 
-        grid = grid.at[params.height - 2, params.width - 2].set(TILES_REGISTRY[Tiles.GOAL, Colors.GREEN])
+        grid = grid.at[params.height - 2, params.width - 2].set(
+            TILES_REGISTRY[Tiles.GOAL, Colors.GREEN]
+        )
         agent = AgentState(position=jnp.array((1, 1)), direction=jnp.asarray(1))
 
         state = State(
@@ -57,10 +59,13 @@ class EmptyRandom(Environment[EnvParams, EnvCarry]):
         key, pos_key, dir_key = jax.random.split(key, num=3)
 
         grid = room(params.height, params.width)
-        grid = grid.at[params.height - 2, params.width - 2].set(TILES_REGISTRY[Tiles.GOAL, Colors.GREEN])
+        grid = grid.at[params.height - 2, params.width - 2].set(
+            TILES_REGISTRY[Tiles.GOAL, Colors.GREEN]
+        )
 
         agent = AgentState(
-            position=sample_coordinates(pos_key, grid, num=1).squeeze(), direction=sample_direction(dir_key)
+            position=sample_coordinates(pos_key, grid, num=1).squeeze(),
+            direction=sample_direction(dir_key),
         )
         state = State(
             key=key,

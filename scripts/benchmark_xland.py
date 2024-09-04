@@ -18,8 +18,15 @@ parser.add_argument("--benchmark-id", type=str, default="Trivial")
 parser.add_argument("--img-obs", action="store_true")
 parser.add_argument("--timesteps", type=int, default=1000)
 parser.add_argument("--num-envs", type=int, default=8192)
-parser.add_argument("--num-repeat", type=int, default=10, help="Number of timing repeats")
-parser.add_argument("--num-iter", type=int, default=1, help="Number of runs during one repeat (time is summed)")
+parser.add_argument(
+    "--num-repeat", type=int, default=10, help="Number of timing repeats"
+)
+parser.add_argument(
+    "--num-iter",
+    type=int,
+    default=1,
+    help="Number of runs during one repeat (time is summed)",
+)
 
 
 def build_benchmark(
@@ -45,13 +52,18 @@ def build_benchmark(
 
     def benchmark_fn(key):
         def _body_fn(timestep, action):
-            new_timestep = jax.vmap(env.step, in_axes=(None, 0, 0))(env_params, timestep, action)
+            new_timestep = jax.vmap(env.step, in_axes=(None, 0, 0))(
+                env_params, timestep, action
+            )
             return new_timestep, None
 
         key, actions_key = jax.random.split(key)
         keys = jax.random.split(key, num=num_envs)
         actions = jax.random.randint(
-            actions_key, shape=(timesteps, num_envs), minval=0, maxval=env.num_actions(env_params)
+            actions_key,
+            shape=(timesteps, num_envs),
+            minval=0,
+            maxval=env.num_actions(env_params),
         )
 
         timestep = jax.vmap(env.reset, in_axes=(None, 0))(env_params, keys)
@@ -87,14 +99,22 @@ if __name__ == "__main__":
     print("Num devices for pmap:", num_devices)
 
     # building for single env benchmarking
-    benchmark_fn_single = build_benchmark(args.env_id, 1, args.timesteps, args.benchmark_id, args.img_obs)
+    benchmark_fn_single = build_benchmark(
+        args.env_id, 1, args.timesteps, args.benchmark_id, args.img_obs
+    )
     benchmark_fn_single = jax.jit(benchmark_fn_single)
     # building vmap for vectorization benchmarking
-    benchmark_fn_vmap = build_benchmark(args.env_id, args.num_envs, args.timesteps, args.benchmark_id, args.img_obs)
+    benchmark_fn_vmap = build_benchmark(
+        args.env_id, args.num_envs, args.timesteps, args.benchmark_id, args.img_obs
+    )
     benchmark_fn_vmap = jax.jit(benchmark_fn_vmap)
     # building pmap for multi-gpu benchmarking (each doing (num_envs / num_devices) vmaps)
     benchmark_fn_pmap = build_benchmark(
-        args.env_id, args.num_envs // num_devices, args.timesteps, args.benchmark_id, args.img_obs
+        args.env_id,
+        args.num_envs // num_devices,
+        args.timesteps,
+        args.benchmark_id,
+        args.img_obs,
     )
     benchmark_fn_pmap = jax.pmap(benchmark_fn_pmap)
 

@@ -47,7 +47,9 @@ class Memory(Environment[EnvParams, MemoryEnvCarry]):
             params = params.replace(max_steps=5 * params.width**2)
         return params
 
-    def _generate_problem(self, params: EnvParams, key: jax.Array) -> State[MemoryEnvCarry]:
+    def _generate_problem(
+        self, params: EnvParams, key: jax.Array
+    ) -> State[MemoryEnvCarry]:
         key, corridor_key, agent_key, mem_key, place_key = jax.random.split(key, num=5)
 
         corridor_length = params.width - 6
@@ -72,8 +74,14 @@ class Memory(Environment[EnvParams, MemoryEnvCarry]):
         sides = jax.random.randint(place_key, shape=(), minval=0, maxval=2)
         grid = jax.lax.select(
             sides,
-            grid.at[1, corridor_end].set(_objects[0]).at[5, corridor_end].set(_objects[1]),
-            grid.at[1, corridor_end].set(_objects[1]).at[5, corridor_end].set(_objects[0]),
+            grid.at[1, corridor_end]
+            .set(_objects[0])
+            .at[5, corridor_end]
+            .set(_objects[1]),
+            grid.at[1, corridor_end]
+            .set(_objects[1])
+            .at[5, corridor_end]
+            .set(_objects[0]),
         )
 
         # choosing success and failure positions
@@ -116,10 +124,16 @@ class Memory(Environment[EnvParams, MemoryEnvCarry]):
             action,
         ).astype(jnp.uint8)
 
-        new_grid, new_agent, _ = take_action(timestep.state.grid, timestep.state.agent, action)
+        new_grid, new_agent, _ = take_action(
+            timestep.state.grid, timestep.state.agent, action
+        )
 
-        new_state = timestep.state.replace(grid=new_grid, agent=new_agent, step_num=timestep.state.step_num + 1)
-        new_observation = transparent_field_of_view(new_state.grid, new_state.agent, params.view_size, params.view_size)
+        new_state = timestep.state.replace(
+            grid=new_grid, agent=new_agent, step_num=timestep.state.step_num + 1
+        )
+        new_observation = transparent_field_of_view(
+            new_state.grid, new_state.agent, params.view_size, params.view_size
+        )
 
         truncated = new_state.step_num == params.max_steps
         terminated = jnp.logical_or(

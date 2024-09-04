@@ -14,7 +14,11 @@ NUM_GOALS = 15
 
 
 def check_goal(
-    encoding: jax.Array, grid: GridState, agent: AgentState, action: int | jax.Array, position: jax.Array
+    encoding: jax.Array,
+    grid: GridState,
+    agent: AgentState,
+    action: int | jax.Array,
+    position: jax.Array,
 ) -> jax.Array:
     check = jax.lax.switch(
         encoding[0],
@@ -44,17 +48,20 @@ def check_goal(
 # should I inherit from abc.ABC?
 class BaseGoal(struct.PyTreeNode):
     @abc.abstractmethod
-    def __call__(self, grid: GridState, agent: AgentState, action: int | jax.Array, position: jax.Array) -> jax.Array:
-        ...
+    def __call__(
+        self,
+        grid: GridState,
+        agent: AgentState,
+        action: int | jax.Array,
+        position: jax.Array,
+    ) -> jax.Array: ...
 
     @classmethod
     @abc.abstractmethod
-    def decode(cls, encoding: jax.Array) -> BaseGoal:
-        ...
+    def decode(cls, encoding: jax.Array) -> BaseGoal: ...
 
     @abc.abstractmethod
-    def encode(self) -> jax.Array:
-        ...
+    def encode(self) -> jax.Array: ...
 
 
 class EmptyGoal(BaseGoal):
@@ -73,7 +80,9 @@ class AgentHoldGoal(BaseGoal):
     tile: jax.Array
 
     def __call__(self, grid, agent, action, position):
-        check = jax.lax.select(jnp.equal(action, 3), equal(agent.pocket, self.tile), jnp.asarray(False))
+        check = jax.lax.select(
+            jnp.equal(action, 3), equal(agent.pocket, self.tile), jnp.asarray(False)
+        )
         return check
 
     @classmethod
@@ -90,7 +99,9 @@ class AgentOnTileGoal(BaseGoal):
 
     def __call__(self, grid, agent, action, position):
         check = jax.lax.select(
-            jnp.equal(action, 0), equal(grid[agent.position[0], agent.position[1]], self.tile), jnp.asarray(False)
+            jnp.equal(action, 0),
+            equal(grid[agent.position[0], agent.position[1]], self.tile),
+            jnp.asarray(False),
         )
         return check
 
@@ -108,8 +119,15 @@ class AgentNearGoal(BaseGoal):
 
     def __call__(self, grid, agent, action, position):
         def _check_fn():
-            up, right, down, left = get_neighbouring_tiles(grid, agent.position[0], agent.position[1])
-            check = equal(up, self.tile) | equal(right, self.tile) | equal(down, self.tile) | equal(left, self.tile)
+            up, right, down, left = get_neighbouring_tiles(
+                grid, agent.position[0], agent.position[1]
+            )
+            check = (
+                equal(up, self.tile)
+                | equal(right, self.tile)
+                | equal(down, self.tile)
+                | equal(left, self.tile)
+            )
 
             return check
 
@@ -135,14 +153,22 @@ class TileNearGoal(BaseGoal):
 
         def _check_fn():
             tile = grid[position[0], position[1]]
-            up, right, down, left = get_neighbouring_tiles(grid, position[0], position[1])
+            up, right, down, left = get_neighbouring_tiles(
+                grid, position[0], position[1]
+            )
 
             check = jax.lax.select(
                 jnp.logical_or(equal(tile, tile_a), equal(tile, tile_b)),
                 jax.lax.select(
                     equal(tile, tile_a),
-                    equal(up, tile_b) | equal(right, tile_b) | equal(down, tile_b) | equal(left, tile_b),
-                    equal(up, tile_a) | equal(right, tile_a) | equal(down, tile_a) | equal(left, tile_a),
+                    equal(up, tile_b)
+                    | equal(right, tile_b)
+                    | equal(down, tile_b)
+                    | equal(left, tile_b),
+                    equal(up, tile_a)
+                    | equal(right, tile_a)
+                    | equal(down, tile_a)
+                    | equal(left, tile_a),
                 ),
                 jnp.asarray(False),
             )
@@ -156,7 +182,9 @@ class TileNearGoal(BaseGoal):
         return cls(tile_a=encoding[1:3], tile_b=encoding[3:5])
 
     def encode(self):
-        encoding = jnp.hstack([jnp.asarray(4), self.tile_a, self.tile_b], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(4), self.tile_a, self.tile_b], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_GOAL_ENCODING_LEN)
 
 
@@ -174,7 +202,9 @@ class TileOnPositionGoal(BaseGoal):
 
     def encode(self):
         # WARN: uint8 type means that max grid size currently is 255
-        encoding = jnp.hstack([jnp.asarray(5), self.tile, self.position], dtype=jnp.uint8)
+        encoding = jnp.hstack(
+            [jnp.asarray(5), self.tile, self.position], dtype=jnp.uint8
+        )
         return pad_along_axis(encoding, MAX_GOAL_ENCODING_LEN)
 
 
@@ -205,12 +235,14 @@ class TileNearUpGoal(BaseGoal):
         def _check_fn():
             up, _, down, _ = get_neighbouring_tiles(grid, y, x)
             check = jnp.logical_or(
-                equal(tile, self.tile_b) & equal(down, self.tile_a), equal(tile, self.tile_a) & equal(up, self.tile_b)
+                equal(tile, self.tile_b) & equal(down, self.tile_a),
+                equal(tile, self.tile_a) & equal(up, self.tile_b),
             )
             return check
 
         check = jax.lax.select(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             _check_fn(),
             jnp.asarray(False),
         )
@@ -242,7 +274,8 @@ class TileNearRightGoal(BaseGoal):
             return check
 
         check = jax.lax.select(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             _check_fn(),
             jnp.asarray(False),
         )
@@ -268,12 +301,14 @@ class TileNearDownGoal(BaseGoal):
         def _check_fn():
             up, _, down, _ = get_neighbouring_tiles(grid, y, x)
             check = jnp.logical_or(
-                equal(tile, self.tile_b) & equal(up, self.tile_a), equal(tile, self.tile_a) & equal(down, self.tile_b)
+                equal(tile, self.tile_b) & equal(up, self.tile_a),
+                equal(tile, self.tile_a) & equal(down, self.tile_b),
             )
             return check
 
         check = jax.lax.select(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             _check_fn(),
             jnp.asarray(False),
         )
@@ -305,7 +340,8 @@ class TileNearLeftGoal(BaseGoal):
             return check
 
         check = jax.lax.select(
-            jnp.equal(action, 4) & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
+            jnp.equal(action, 4)
+            & (equal(tile, self.tile_a) | equal(tile, self.tile_b)),
             _check_fn(),
             jnp.asarray(False),
         )
@@ -325,7 +361,9 @@ class AgentNearUpGoal(BaseGoal):
 
     def __call__(self, grid, agent, action, position):
         def _check_fn():
-            up, _, _, _ = get_neighbouring_tiles(grid, agent.position[0], agent.position[1])
+            up, _, _, _ = get_neighbouring_tiles(
+                grid, agent.position[0], agent.position[1]
+            )
             check = equal(up, self.tile)
             return check
 
@@ -350,7 +388,9 @@ class AgentNearRightGoal(BaseGoal):
 
     def __call__(self, grid, agent, action, position):
         def _check_fn():
-            _, right, _, _ = get_neighbouring_tiles(grid, agent.position[0], agent.position[1])
+            _, right, _, _ = get_neighbouring_tiles(
+                grid, agent.position[0], agent.position[1]
+            )
             check = equal(right, self.tile)
             return check
 
@@ -375,7 +415,9 @@ class AgentNearDownGoal(BaseGoal):
 
     def __call__(self, grid, agent, action, position):
         def _check_fn():
-            _, _, down, _ = get_neighbouring_tiles(grid, agent.position[0], agent.position[1])
+            _, _, down, _ = get_neighbouring_tiles(
+                grid, agent.position[0], agent.position[1]
+            )
             check = equal(down, self.tile)
             return check
 
@@ -400,7 +442,9 @@ class AgentNearLeftGoal(BaseGoal):
 
     def __call__(self, grid, agent, action, position):
         def _check_fn():
-            _, _, _, left = get_neighbouring_tiles(grid, agent.position[0], agent.position[1])
+            _, _, _, left = get_neighbouring_tiles(
+                grid, agent.position[0], agent.position[1]
+            )
             check = equal(left, self.tile)
             return check
 

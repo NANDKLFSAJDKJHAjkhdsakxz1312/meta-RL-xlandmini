@@ -61,14 +61,22 @@ class TrainConfig:
         self.total_timesteps_per_device = self.total_timesteps // num_devices
         self.eval_episodes_per_device = self.eval_episodes // num_devices
         assert self.num_envs % num_devices == 0
-        self.num_updates = self.total_timesteps_per_device // self.num_steps // self.num_envs_per_device
+        self.num_updates = (
+            self.total_timesteps_per_device
+            // self.num_steps
+            // self.num_envs_per_device
+        )
         print(f"Num devices: {num_devices}, Num updates: {self.num_updates}")
 
 
 def make_states(config: TrainConfig):
     # for learning rate scheduling
     def linear_schedule(count):
-        frac = 1.0 - (count // (config.num_minibatches * config.update_epochs)) / config.num_updates
+        frac = (
+            1.0
+            - (count // (config.num_minibatches * config.update_epochs))
+            / config.num_updates
+        )
         return config.lr * frac
 
     # setup environment
@@ -77,10 +85,16 @@ def make_states(config: TrainConfig):
 
     # for single-task XLand environments
     if config.benchmark_id is not None:
-        assert "XLand-MiniGrid" in config.env_id, "Benchmarks should be used only with XLand environments."
-        assert config.ruleset_id is not None, "Ruleset ID should be specified for benchmarks usage."
+        assert (
+            "XLand-MiniGrid" in config.env_id
+        ), "Benchmarks should be used only with XLand environments."
+        assert (
+            config.ruleset_id is not None
+        ), "Ruleset ID should be specified for benchmarks usage."
         benchmark = xminigrid.load_benchmark(config.benchmark_id)
-        env_params = env_params.replace(ruleset=benchmark.get_ruleset(config.ruleset_id))
+        env_params = env_params.replace(
+            ruleset=benchmark.get_ruleset(config.ruleset_id)
+        )
 
     # enabling image observations if needed
     if config.img_obs:
@@ -102,7 +116,9 @@ def make_states(config: TrainConfig):
     )
     # [batch_size, seq_len, ...]
     init_obs = {
-        "observation": jnp.zeros((config.num_envs_per_device, 1, *env.observation_shape(env_params))),
+        "observation": jnp.zeros(
+            (config.num_envs_per_device, 1, *env.observation_shape(env_params))
+        ),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
     }
@@ -111,9 +127,13 @@ def make_states(config: TrainConfig):
     network_params = network.init(_rng, init_obs, init_hstate)
     tx = optax.chain(
         optax.clip_by_global_norm(config.max_grad_norm),
-        optax.inject_hyperparams(optax.adam)(learning_rate=linear_schedule, eps=1e-8),  # eps=1e-5
+        optax.inject_hyperparams(optax.adam)(
+            learning_rate=linear_schedule, eps=1e-8
+        ),  # eps=1e-5
     )
-    train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
+    train_state = TrainState.create(
+        apply_fn=network.apply, params=network_params, tx=tx
+    )
 
     return rng, env, env_params, init_hstate, train_state
 
@@ -141,7 +161,14 @@ def make_train(
         def _update_step(runner_state, _):
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, _):
-                rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
+                (
+                    rng,
+                    train_state,
+                    prev_timestep,
+                    prev_action,
+                    prev_reward,
+                    prev_hstate,
+                ) = runner_state
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
@@ -157,10 +184,16 @@ def make_train(
                 )
                 action, log_prob = dist.sample_and_log_prob(seed=_rng)
                 # squeeze seq_len where possible
-                action, value, log_prob = action.squeeze(1), value.squeeze(1), log_prob.squeeze(1)
+                action, value, log_prob = (
+                    action.squeeze(1),
+                    value.squeeze(1),
+                    log_prob.squeeze(1),
+                )
 
                 # STEP ENV
-                timestep = jax.vmap(env.step, in_axes=(None, 0, 0))(env_params, prev_timestep, action)
+                timestep = jax.vmap(env.step, in_axes=(None, 0, 0))(
+                    env_params, prev_timestep, action
+                )
                 transition = Transition(
                     done=timestep.last(),
                     action=action,
@@ -171,12 +204,21 @@ def make_train(
                     prev_action=prev_action,
                     prev_reward=prev_reward,
                 )
-                runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
+                runner_state = (
+                    rng,
+                    train_state,
+                    timestep,
+                    action,
+                    timestep.reward,
+                    hstate,
+                )
                 return runner_state, transition
 
             initial_hstate = runner_state[-1]
             # transitions: [seq_len, batch_size, ...]
-            runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps)
+            runner_state, transitions = jax.lax.scan(
+                _env_step, runner_state, None, config.num_steps
+            )
 
             # CALCULATE ADVANTAGE
             rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
@@ -190,7 +232,9 @@ def make_train(
                 },
                 hstate,
             )
-            advantages, targets = calculate_gae(transitions, last_val.squeeze(1), config.gamma, config.gae_lambda)
+            advantages, targets = calculate_gae(
+                transitions, last_val.squeeze(1), config.gamma, config.gae_lambda
+            )
 
             # UPDATE NETWORK
             def _update_epoch(update_state, _):
@@ -208,7 +252,9 @@ def make_train(
                     )
                     return new_train_state, update_info
 
-                rng, train_state, init_hstate, transitions, advantages, targets = update_state
+                rng, train_state, init_hstate, transitions, advantages, targets = (
+                    update_state
+                )
 
                 # MINIBATCHES PREPARATION
                 rng, _rng = jax.random.split(rng)
@@ -218,20 +264,43 @@ def make_train(
                 # [batch_size, seq_len, ...], as our model assumes
                 batch = jtu.tree_map(lambda x: x.swapaxes(0, 1), batch)
 
-                shuffled_batch = jtu.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
+                shuffled_batch = jtu.tree_map(
+                    lambda x: jnp.take(x, permutation, axis=0), batch
+                )
                 # [num_minibatches, minibatch_size, ...]
                 minibatches = jtu.tree_map(
-                    lambda x: jnp.reshape(x, (config.num_minibatches, -1) + x.shape[1:]), shuffled_batch
+                    lambda x: jnp.reshape(
+                        x, (config.num_minibatches, -1) + x.shape[1:]
+                    ),
+                    shuffled_batch,
                 )
-                train_state, update_info = jax.lax.scan(_update_minbatch, train_state, minibatches)
+                train_state, update_info = jax.lax.scan(
+                    _update_minbatch, train_state, minibatches
+                )
 
-                update_state = (rng, train_state, init_hstate, transitions, advantages, targets)
+                update_state = (
+                    rng,
+                    train_state,
+                    init_hstate,
+                    transitions,
+                    advantages,
+                    targets,
+                )
                 return update_state, update_info
 
             # [seq_len, batch_size, num_layers, hidden_dim]
             init_hstate = initial_hstate[None, :]
-            update_state = (rng, train_state, init_hstate, transitions, advantages, targets)
-            update_state, loss_info = jax.lax.scan(_update_epoch, update_state, None, config.update_epochs)
+            update_state = (
+                rng,
+                train_state,
+                init_hstate,
+                transitions,
+                advantages,
+                targets,
+            )
+            update_state, loss_info = jax.lax.scan(
+                _update_epoch, update_state, None, config.update_epochs
+            )
 
             # averaging over minibatches then over epochs
             loss_info = jtu.tree_map(lambda x: x.mean(-1).mean(-1), loss_info)
@@ -259,11 +328,27 @@ def make_train(
                     "lr": train_state.opt_state[-1].hyperparams["learning_rate"],
                 }
             )
-            runner_state = (rng, train_state, timestep, prev_action, prev_reward, hstate)
+            runner_state = (
+                rng,
+                train_state,
+                timestep,
+                prev_action,
+                prev_reward,
+                hstate,
+            )
             return runner_state, loss_info
 
-        runner_state = (rng, train_state, timestep, prev_action, prev_reward, init_hstate)
-        runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config.num_updates)
+        runner_state = (
+            rng,
+            train_state,
+            timestep,
+            prev_action,
+            prev_reward,
+            init_hstate,
+        )
+        runner_state, loss_info = jax.lax.scan(
+            _update_step, runner_state, None, config.num_updates
+        )
         return {"runner_state": runner_state, "loss_info": loss_info}
 
     return train
@@ -305,13 +390,17 @@ def train(config: TrainConfig):
     total_transitions = 0
     for i in range(config.num_updates):
         # summing total transitions per update from all devices
-        total_transitions += config.num_steps * config.num_envs_per_device * jax.local_device_count()
+        total_transitions += (
+            config.num_steps * config.num_envs_per_device * jax.local_device_count()
+        )
         info = jtu.tree_map(lambda x: x[i].item(), loss_info)
         info["transitions"] = total_transitions
         wandb.log(info)
 
     run.summary["training_time"] = elapsed_time
-    run.summary["steps_per_second"] = (config.total_timesteps_per_device * jax.local_device_count()) / elapsed_time
+    run.summary["steps_per_second"] = (
+        config.total_timesteps_per_device * jax.local_device_count()
+    ) / elapsed_time
 
     print("Final return: ", float(loss_info["eval/returns"][-1]))
     run.finish()

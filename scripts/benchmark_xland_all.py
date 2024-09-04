@@ -20,12 +20,23 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--benchmark-id", type=str, default="trivial-1m")
 parser.add_argument("--img-obs", action="store_true")
 parser.add_argument("--timesteps", type=int, default=1000)
-parser.add_argument("--num-repeat", type=int, default=10, help="Number of timing repeats")
-parser.add_argument("--num-iter", type=int, default=1, help="Number of runs during one repeat (time is summed)")
+parser.add_argument(
+    "--num-repeat", type=int, default=10, help="Number of timing repeats"
+)
+parser.add_argument(
+    "--num-iter",
+    type=int,
+    default=1,
+    help="Number of runs during one repeat (time is summed)",
+)
 
 
 def build_benchmark(
-    env_id: str, num_envs: int, timesteps: int, benchmark_id: Optional[str] = None, img_obs: bool = False
+    env_id: str,
+    num_envs: int,
+    timesteps: int,
+    benchmark_id: Optional[str] = None,
+    img_obs: bool = False,
 ):
     env, env_params = xminigrid.make(env_id)
     env = GymAutoResetWrapper(env)
@@ -43,13 +54,18 @@ def build_benchmark(
 
     def benchmark_fn(key):
         def _body_fn(timestep, action):
-            new_timestep = jax.vmap(env.step, in_axes=(None, 0, 0))(env_params, timestep, action)
+            new_timestep = jax.vmap(env.step, in_axes=(None, 0, 0))(
+                env_params, timestep, action
+            )
             return new_timestep, None
 
         key, actions_key = jax.random.split(key)
         keys = jax.random.split(key, num=num_envs)
         actions = jax.random.randint(
-            actions_key, shape=(timesteps, num_envs), minval=0, maxval=env.num_actions(env_params)
+            actions_key,
+            shape=(timesteps, num_envs),
+            minval=0,
+            maxval=env.num_actions(env_params),
         )
 
         timestep = jax.vmap(env.reset, in_axes=(None, 0))(env_params, keys)
@@ -88,14 +104,20 @@ if __name__ == "__main__":
             assert num_envs % num_devices == 0
             # building pmap for multi-gpu benchmarking (each doing (num_envs / num_devices) vmaps)
             benchmark_fn_pmap = build_benchmark(
-                env_id, num_envs // num_devices, args.timesteps, args.benchmark_id, args.img_obs
+                env_id,
+                num_envs // num_devices,
+                args.timesteps,
+                args.benchmark_id,
+                args.img_obs,
             )
             benchmark_fn_pmap = jax.pmap(benchmark_fn_pmap)
 
             # benchmarking
             pmap_keys = jax.random.split(jax.random.key(0), num=num_devices)
 
-            elapsed_time = timeit_benchmark(args, jtu.Partial(benchmark_fn_pmap, pmap_keys))
+            elapsed_time = timeit_benchmark(
+                args, jtu.Partial(benchmark_fn_pmap, pmap_keys)
+            )
             pmap_fps = (args.timesteps * num_envs) // elapsed_time
 
             results[env_id] = int(pmap_fps)

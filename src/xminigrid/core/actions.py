@@ -54,7 +54,9 @@ def pick_up(grid: GridState, agent: AgentState) -> ActionOutput:
     new_grid, new_agent = jax.lax.cond(
         is_pickable & is_empty_pocket,
         lambda: (
-            grid.at[next_position[0], next_position[1]].set(TILES_REGISTRY[Tiles.FLOOR, Colors.BLACK]),
+            grid.at[next_position[0], next_position[1]].set(
+                TILES_REGISTRY[Tiles.FLOOR, Colors.BLACK]
+            ),
             agent.replace(
                 pocket=TILES_REGISTRY[
                     grid[next_position[0], next_position[1], 0],
@@ -90,20 +92,27 @@ def toggle(grid: GridState, agent: AgentState) -> ActionOutput:
 
     # check door_locked
     new_grid = jax.lax.select(
-        jnp.equal(next_tile[0], Tiles.DOOR_LOCKED) & equal(agent.pocket, TILES_REGISTRY[Tiles.KEY, next_tile[1]]),
-        grid.at[next_position[0], next_position[1]].set(TILES_REGISTRY[Tiles.DOOR_OPEN, next_tile[1]]),
+        jnp.equal(next_tile[0], Tiles.DOOR_LOCKED)
+        & equal(agent.pocket, TILES_REGISTRY[Tiles.KEY, next_tile[1]]),
+        grid.at[next_position[0], next_position[1]].set(
+            TILES_REGISTRY[Tiles.DOOR_OPEN, next_tile[1]]
+        ),
         grid,
     )
     # check door_closed
     new_grid = jax.lax.select(
         jnp.equal(next_tile[0], Tiles.DOOR_CLOSED),
-        grid.at[next_position[0], next_position[1]].set(TILES_REGISTRY[Tiles.DOOR_OPEN, next_tile[1]]),
+        grid.at[next_position[0], next_position[1]].set(
+            TILES_REGISTRY[Tiles.DOOR_OPEN, next_tile[1]]
+        ),
         new_grid,
     )
     # check door_open
     new_grid = jax.lax.select(
         jnp.equal(next_tile[0], Tiles.DOOR_OPEN),
-        grid.at[next_position[0], next_position[1]].set(TILES_REGISTRY[Tiles.DOOR_CLOSED, next_tile[1]]),
+        grid.at[next_position[0], next_position[1]].set(
+            TILES_REGISTRY[Tiles.DOOR_CLOSED, next_tile[1]]
+        ),
         new_grid,
     )
     return new_grid, agent, next_position

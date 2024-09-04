@@ -6,7 +6,15 @@ import jax
 import jax.numpy as jnp
 
 from ..types import GridState, IntOrArray, Tile
-from .constants import FREE_TO_PUT_DOWN, LOS_BLOCKING, PICKABLE, TILES_REGISTRY, WALKABLE, Colors, Tiles
+from .constants import (
+    FREE_TO_PUT_DOWN,
+    LOS_BLOCKING,
+    PICKABLE,
+    TILES_REGISTRY,
+    WALKABLE,
+    Colors,
+    Tiles,
+)
 
 
 def empty_world(height: IntOrArray, width: IntOrArray) -> GridState:
@@ -20,7 +28,9 @@ def equal(tile1: Tile, tile2: Tile) -> Tile:
     return jnp.all(jnp.equal(tile1, tile2))
 
 
-def get_neighbouring_tiles(grid: GridState, y: IntOrArray, x: IntOrArray) -> tuple[Tile, Tile, Tile, Tile]:
+def get_neighbouring_tiles(
+    grid: GridState, y: IntOrArray, x: IntOrArray
+) -> tuple[Tile, Tile, Tile, Tile]:
     # end_of_map = TILES_REGISTRY[Tiles.END_OF_MAP, Colors.END_OF_MAP]
     end_of_map = Tiles.EMPTY
 
@@ -35,17 +45,28 @@ def get_neighbouring_tiles(grid: GridState, y: IntOrArray, x: IntOrArray) -> tup
     return up_tile, right_tile, down_tile, left_tile
 
 
-def horizontal_line(grid: GridState, x: IntOrArray, y: IntOrArray, length: IntOrArray, tile: Tile) -> GridState:
+def horizontal_line(
+    grid: GridState, x: IntOrArray, y: IntOrArray, length: IntOrArray, tile: Tile
+) -> GridState:
     grid = grid.at[y, x : x + length].set(tile)
     return grid
 
 
-def vertical_line(grid: GridState, x: IntOrArray, y: IntOrArray, length: IntOrArray, tile: Tile) -> GridState:
+def vertical_line(
+    grid: GridState, x: IntOrArray, y: IntOrArray, length: IntOrArray, tile: Tile
+) -> GridState:
     grid = grid.at[y : y + length, x].set(tile)
     return grid
 
 
-def rectangle(grid: GridState, x: IntOrArray, y: IntOrArray, h: IntOrArray, w: IntOrArray, tile: Tile) -> GridState:
+def rectangle(
+    grid: GridState,
+    x: IntOrArray,
+    y: IntOrArray,
+    h: IntOrArray,
+    w: IntOrArray,
+    tile: Tile,
+) -> GridState:
     grid = vertical_line(grid, x, y, h, tile)
     grid = vertical_line(grid, x + w - 1, y, h, tile)
     grid = horizontal_line(grid, x, y, w, tile)
@@ -55,7 +76,9 @@ def rectangle(grid: GridState, x: IntOrArray, y: IntOrArray, h: IntOrArray, w: I
 
 def room(height: IntOrArray, width: IntOrArray) -> GridState:
     grid = empty_world(height, width)
-    grid = rectangle(grid, 0, 0, height, width, tile=TILES_REGISTRY[Tiles.WALL, Colors.GREY])
+    grid = rectangle(
+        grid, 0, 0, height, width, tile=TILES_REGISTRY[Tiles.WALL, Colors.GREY]
+    )
     return grid
 
 
@@ -150,7 +173,9 @@ def free_tiles_mask(grid: GridState) -> jax.Array:
     return mask
 
 
-def coordinates_mask(grid: GridState, address: tuple[IntOrArray, IntOrArray], comparison_fn: Callable) -> jax.Array:
+def coordinates_mask(
+    grid: GridState, address: tuple[IntOrArray, IntOrArray], comparison_fn: Callable
+) -> jax.Array:
     positions = jnp.mgrid[: grid.shape[0], : grid.shape[1]]
     cond_1 = comparison_fn(positions[0], address[0])
     cond_2 = comparison_fn(positions[1], address[1])
@@ -158,7 +183,9 @@ def coordinates_mask(grid: GridState, address: tuple[IntOrArray, IntOrArray], co
     return mask
 
 
-def sample_coordinates(key: jax.Array, grid: GridState, num: int, mask: jax.Array | None = None) -> jax.Array:
+def sample_coordinates(
+    key: jax.Array, grid: GridState, num: int, mask: jax.Array | None = None
+) -> jax.Array:
     if mask is None:
         mask = jnp.ones((grid.shape[0], grid.shape[1]), dtype=jnp.bool_)
 
@@ -170,7 +197,9 @@ def sample_coordinates(key: jax.Array, grid: GridState, num: int, mask: jax.Arra
         p=(mask & free_tiles_mask(grid)).flatten(),
     )
     coords = jnp.divmod(coords, grid.shape[1])
-    coords = jnp.concatenate((coords[0].reshape(-1, 1), coords[1].reshape(-1, 1)), axis=-1)
+    coords = jnp.concatenate(
+        (coords[0].reshape(-1, 1), coords[1].reshape(-1, 1)), axis=-1
+    )
     return coords
 
 
@@ -178,7 +207,9 @@ def sample_direction(key: jax.Array) -> jax.Array:
     return jax.random.randint(key, shape=(), minval=0, maxval=4)
 
 
-def pad_along_axis(arr: jax.Array, pad_to: int, axis: int = 0, fill_value: int = 0) -> jax.Array:
+def pad_along_axis(
+    arr: jax.Array, pad_to: int, axis: int = 0, fill_value: int = 0
+) -> jax.Array:
     pad_size = pad_to - arr.shape[axis]
     if pad_size <= 0:
         return arr

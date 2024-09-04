@@ -80,7 +80,9 @@ class ManualControl:
         # Create background with mission description
         offset = surf.get_size()[0] * 0.1
         # offset = 32 if self.agent_pov else 64
-        bg = pygame.Surface((int(surf.get_size()[0] + offset), int(surf.get_size()[1] + offset)))
+        bg = pygame.Surface(
+            (int(surf.get_size()[0] + offset), int(surf.get_size()[1] + offset))
+        )
         bg.convert()
         bg.fill((255, 255, 255))
         bg.blit(surf, (offset / 2, 0))
@@ -167,27 +169,49 @@ class ManualControl:
 
         if self.save_video:
             assert self.video_path is not None
-            save_path = os.path.join(self.video_path, f"manual_control_rollout{self.video_format}")
+            save_path = os.path.join(
+                self.video_path, f"manual_control_rollout{self.video_format}"
+            )
             if self.video_format == ".mp4":
-                iio.imwrite(save_path, self.frames, format_hint=".mp4", fps=self.video_fps)
+                iio.imwrite(
+                    save_path, self.frames, format_hint=".mp4", fps=self.video_fps
+                )
             elif self.video_format == ".gif":
                 iio.imwrite(
-                    save_path, self.frames[:-1], format_hint=".gif", duration=(1000 * 1 / self.video_fps), loop=10
+                    save_path,
+                    self.frames[:-1],
+                    format_hint=".gif",
+                    duration=(1000 * 1 / self.video_fps),
+                    loop=10,
                 )
                 # iio.imwrite(save_path, self.frames, format_hint=".gif", duration=(1000 * 1 / self.video_fps), loop=10)
             else:
-                raise RuntimeError("Unknown video format! Should be one of ('.mp4', '.gif')")
+                raise RuntimeError(
+                    "Unknown video format! Should be one of ('.mp4', '.gif')"
+                )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env-id", type=str, default="MiniGrid-Empty-5x5", choices=xminigrid.registered_environments())
-    parser.add_argument("--benchmark-id", type=str, default="trivial-1m", choices=xminigrid.registered_benchmarks())
+    parser.add_argument(
+        "--env-id",
+        type=str,
+        default="MiniGrid-Empty-5x5",
+        choices=xminigrid.registered_environments(),
+    )
+    parser.add_argument(
+        "--benchmark-id",
+        type=str,
+        default="trivial-1m",
+        choices=xminigrid.registered_benchmarks(),
+    )
     parser.add_argument("--ruleset-id", type=int, default=0)
     parser.add_argument("--agent-view", action="store_true")
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--video-path", type=str, default=".")
-    parser.add_argument("--video-format", type=str, default=".mp4", choices=(".mp4", ".gif"))
+    parser.add_argument(
+        "--video-format", type=str, default=".mp4", choices=(".mp4", ".gif")
+    )
     parser.add_argument("--video-fps", type=int, default=5)
 
     args = parser.parse_args()

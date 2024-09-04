@@ -55,20 +55,48 @@ COLORS = [
 # we need to distinguish between them, to avoid sampling
 # near(goal, goal) goal or rule as goal tiles are not pickable
 NEAR_TILES_LHS = list(
-    product([Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX, Tiles.GOAL], COLORS)
+    product(
+        [
+            Tiles.BALL,
+            Tiles.SQUARE,
+            Tiles.PYRAMID,
+            Tiles.KEY,
+            Tiles.STAR,
+            Tiles.HEX,
+            Tiles.GOAL,
+        ],
+        COLORS,
+    )
 )
 # these are pickable!
-NEAR_TILES_RHS = list(product([Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX], COLORS))
+NEAR_TILES_RHS = list(
+    product(
+        [Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX],
+        COLORS,
+    )
+)
 
-HOLD_TILES = list(product([Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX], COLORS))
+HOLD_TILES = list(
+    product(
+        [Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX],
+        COLORS,
+    )
+)
 
 # to imitate disappearance production rule
-PROD_TILES = list(product([Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX], COLORS))
+PROD_TILES = list(
+    product(
+        [Tiles.BALL, Tiles.SQUARE, Tiles.PYRAMID, Tiles.KEY, Tiles.STAR, Tiles.HEX],
+        COLORS,
+    )
+)
 PROD_TILES = PROD_TILES + [(Tiles.FLOOR, Colors.BLACK)]
 
 
 def encode(ruleset):
-    flatten_encoding = jnp.concatenate([ruleset["goal"].encode(), *[r.encode() for r in ruleset["rules"]]]).tolist()
+    flatten_encoding = jnp.concatenate(
+        [ruleset["goal"].encode(), *[r.encode() for r in ruleset["rules"]]]
+    ).tolist()
     return tuple(flatten_encoding)
 
 
@@ -139,7 +167,11 @@ def sample_rule(prod_tile, used_tiles):
     elif 6 <= rule_idx <= 10:
         tile_a = random.choice(diff(NEAR_TILES_LHS, used_tiles))
         tile_b = random.choice(diff(NEAR_TILES_RHS, used_tiles))
-        rule = rules[rule_idx](tile_a=jnp.array(tile_a), tile_b=jnp.array(tile_b), prod_tile=jnp.array(prod_tile))
+        rule = rules[rule_idx](
+            tile_a=jnp.array(tile_a),
+            tile_b=jnp.array(tile_b),
+            prod_tile=jnp.array(prod_tile),
+        )
         return rule, (tile_a, tile_b)
     else:
         raise RuntimeError("Unknown rule")
@@ -203,7 +235,9 @@ def sample_ruleset(
         chain_tiles = next_chain_tiles
 
     # sample distractor objects
-    init_tiles.extend(random.choices(diff(NEAR_TILES_LHS, used_tiles), k=num_distractor_objects))
+    init_tiles.extend(
+        random.choices(diff(NEAR_TILES_LHS, used_tiles), k=num_distractor_objects)
+    )
     # sample distractor rules
     if sample_distractor_rules:
         num_distractor_rules = random.randint(0, num_distractor_rules)
@@ -298,8 +332,15 @@ if __name__ == "__main__":
     concat_rulesets = {
         "generation_config": vars(args),
         "goals": jnp.vstack([r["goal"] for r in rulesets]),
-        "rules": jnp.vstack([pad_along_axis(r["rules"], pad_to=max_rules)[None, ...] for r in rulesets]),
-        "init_tiles": jnp.vstack([pad_along_axis(r["init_tiles"], pad_to=max_tiles)[None, ...] for r in rulesets]),
+        "rules": jnp.vstack(
+            [pad_along_axis(r["rules"], pad_to=max_rules)[None, ...] for r in rulesets]
+        ),
+        "init_tiles": jnp.vstack(
+            [
+                pad_along_axis(r["init_tiles"], pad_to=max_tiles)[None, ...]
+                for r in rulesets
+            ]
+        ),
         "num_rules": jnp.vstack([r["num_rules"] for r in rulesets]),
     }
     print("Saving...")

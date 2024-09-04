@@ -15,7 +15,9 @@ def downsample(img: np.ndarray, factor: int) -> np.ndarray:
     assert img.shape[0] % factor == 0
     assert img.shape[1] % factor == 0
 
-    img = img.reshape([img.shape[0] // factor, factor, img.shape[1] // factor, factor, 3])
+    img = img.reshape(
+        [img.shape[0] // factor, factor, img.shape[1] // factor, factor, 3]
+    )
     img = img.mean(axis=3)
     img = img.mean(axis=1)
 
@@ -128,7 +130,9 @@ def point_in_hexagon(s: float) -> Callable:
     return fn
 
 
-def highlight_img(img: np.ndarray, color: Color = (255, 255, 255), alpha: float = 0.30) -> None:
+def highlight_img(
+    img: np.ndarray, color: Color = (255, 255, 255), alpha: float = 0.30
+) -> None:
     blend_img = img + alpha * (np.array(color, dtype=np.uint8) - img)
     blend_img = blend_img.clip(0, 255).astype(np.uint8)
     img[:, :, :] = blend_img
