@@ -75,7 +75,11 @@ target-version = "py310"
 select = ["E", "F", "I001", "RUF100"]
 # TODO: remove F401 from ignored later
 ignore = [
-    "ALL"
+    "W191", "E111", "E114",
+    "E117", "D206", "D300",
+    "Q000", "Q001", "Q002",
+    "Q003", "COM812", "COM819",
+    "ISC001", "ISC002", "F401"
 ]
 
 [tool.ruff.format]
