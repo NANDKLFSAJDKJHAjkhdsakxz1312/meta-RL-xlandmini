@@ -1,7 +1,8 @@
-from typing import Any, Tuple, Optional, Union
-import jax
-import chex
 from functools import partial
+from typing import Any, Optional, Tuple, Union
+
+import chex
+import jax
 from flax import struct
 
 

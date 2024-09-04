@@ -1,4 +1,5 @@
-from typing import Literal, Optional, TypedDict, Tuple, Callable
+from typing import Callable, Literal, Optional, Tuple, TypedDict
+
 import chex
 import jax
 import jax.numpy as jnp

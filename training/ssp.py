@@ -1,9 +1,10 @@
+import itertools
+
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import nengo_spa as spa
-import itertools
-from utils_ssp import SPSpace, SSPSpace, HexagonalSSPSpace
+from utils_ssp import HexagonalSSPSpace, SPSpace, SSPSpace
 
 # Hyper parameters
 SSP_DIM = 1015

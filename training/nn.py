@@ -2,6 +2,7 @@
 # https://github.com/lcswillems/rl-starter-files/blob/master/model.py
 import math
 from typing import Optional, TypedDict
+
 import distrax
 import flax
 import flax.linen as nn

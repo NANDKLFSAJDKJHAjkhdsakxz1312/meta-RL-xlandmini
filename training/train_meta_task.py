@@ -1,41 +1,42 @@
 # Adapted from PureJaxRL implementation and minigrid baselines, source:
 # https://github.com/lupuandr/explainable-policies/blob/50acbd777dc7c6d6b8b7255cd1249e81715bcb54/purejaxrl/ppo_rnn.py#L4
 # https://github.com/lcswillems/rl-starter-files/blob/master/model.py
+import logging
 import os
 import shutil
 import time
 from dataclasses import asdict, dataclass
+from enum import IntEnum
 from functools import partial
-from typing import Optional, Literal
+from typing import Literal, Optional
+
 import chex
 import jax
-import logging
 import jax.numpy as jnp
 import jax.tree_util as jtu
+import numpy as np
 import optax
 import orbax
 import pyrallis
 import wandb
-import xminigrid
 from flax import core, struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
+from new_level_sampler import (
+    LevelSampler,
+    compute_max_returns,
+    compute_score,
+    make_level_generator,
+)
 from nn import ActorCriticRNN
+from ssp import check_global_env_ssp, create_observation_dict, get_global_env_ssp
 from utils import Transition, calculate_gae, ppo_update_networks, rollout
+
+import xminigrid
 from xminigrid.benchmarks import Benchmark
 from xminigrid.environment import Environment, EnvParams
 from xminigrid.wrappers import DirectionObservationWrapper, GymAutoResetWrapper
-
-from new_level_sampler import (
-    LevelSampler,
-    make_level_generator,
-    compute_max_returns,
-    compute_score,
-)
-import numpy as np
-from enum import IntEnum
-from ssp import get_global_env_ssp, check_global_env_ssp, create_observation_dict
 
 
 class UpdateState(IntEnum):

@@ -1,10 +1,9 @@
-import numpy as np
-from scipy.stats import qmc
-from scipy.stats import special_ortho_group
-from scipy.optimize import minimize
-from nengo.dists import UniformHypersphere
-
 import warnings
+
+import numpy as np
+from nengo.dists import UniformHypersphere
+from scipy.optimize import minimize
+from scipy.stats import qmc, special_ortho_group
 
 
 class SPSpace:

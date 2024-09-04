@@ -5,8 +5,9 @@ import imageio
 import jax
 import jax.numpy as jnp
 import orbax.checkpoint
-import xminigrid
 from nn import ActorCriticRNN
+
+import xminigrid
 from xminigrid.rendering.text_render import print_ruleset
 from xminigrid.wrappers import GymAutoResetWrapper
 
