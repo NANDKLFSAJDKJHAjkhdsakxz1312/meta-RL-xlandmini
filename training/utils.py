@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 from flax import struct
 from flax.training.train_state import TrainState
+
 from xminigrid.environment import Environment, EnvParams
 
 
@@ -13,7 +14,9 @@ class Transition(struct.PyTreeNode):
     value: jax.Array
     reward: jax.Array
     log_prob: jax.Array
+    # for obs
     obs: jax.Array
+    dir: jax.Array
     # for rnn policy
     prev_action: jax.Array
     prev_reward: jax.Array
@@ -61,7 +64,8 @@ def ppo_update_networks(
             params,
             {
                 # [batch_size, seq_len, ...]
-                "observation": transitions.obs,
+                "obs_img": transitions.obs,
+                "obs_dir": transitions.dir,
                 "prev_action": transitions.prev_action,
                 "prev_reward": transitions.prev_reward,
             },
@@ -74,6 +78,7 @@ def ppo_update_networks(
         value_loss = jnp.square(value - targets)
         value_loss_clipped = jnp.square(value_pred_clipped - targets)
         value_loss = 0.5 * jnp.maximum(value_loss, value_loss_clipped).mean()
+
         # TODO: ablate this!
         # value_loss = jnp.square(value - targets).mean()
 
@@ -126,7 +131,8 @@ def rollout(
         dist, _, hstate = train_state.apply_fn(
             train_state.params,
             {
-                "observation": timestep.observation[None, None, ...],
+                "obs_img": timestep.observation["img"][None, None, ...],
+                "obs_dir": timestep.observation["direction"][None, None, ...],
                 "prev_action": prev_action[None, None, ...],
                 "prev_reward": prev_reward[None, None, ...],
             },
