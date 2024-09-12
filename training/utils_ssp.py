@@ -4,6 +4,7 @@ import numpy as np
 from nengo.dists import UniformHypersphere
 from scipy.optimize import minimize
 from scipy.stats import qmc, special_ortho_group
+import jax.numpy as jnp
 
 
 class SPSpace:
@@ -297,14 +298,14 @@ class SSPSpace:
 
         """
 
-        x = np.atleast_2d(x)
-        ls_mat = np.atleast_2d(np.diag(1 / self.length_scale.flatten()))
+        x = jnp.atleast_2d(x)
+        ls_mat = jnp.atleast_2d(jnp.diag(1 / self.length_scale.flatten()))
         assert ls_mat.shape == (
             self.domain_dim,
             self.domain_dim,
         ), f"Expected Len Scale mat with dimensions {(self.domain_dim, self.domain_dim)}, got {ls_mat.shape}"
         scaled_x = x @ ls_mat
-        data = np.fft.ifft(np.exp(1.0j * self.phase_matrix @ scaled_x.T), axis=0).real
+        data = jnp.fft.ifft(jnp.exp(1.0j * self.phase_matrix @ scaled_x.T), axis=0).real
         return data.T
 
     def encode_and_deriv(self, x):
@@ -584,9 +585,9 @@ class SSPSpace:
         return s
 
     def bind(self, a, b):
-        a = np.atleast_2d(a)
-        b = np.atleast_2d(b)
-        return np.fft.ifft(np.fft.fft(a, axis=1) * np.fft.fft(b, axis=1), axis=1).real
+        a = jnp.atleast_2d(a)
+        b = jnp.atleast_2d(b)
+        return jnp.fft.ifft(jnp.fft.fft(a, axis=1) * jnp.fft.fft(b, axis=1), axis=1).real
 
     def invert(self, a):
         a = np.atleast_2d(a)

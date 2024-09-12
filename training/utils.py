@@ -74,6 +74,7 @@ def ppo_update_networks(
                 "prev_reward": transitions.prev_reward,
             },
             init_hstate,
+            
         )
         log_prob = dist.log_prob(transitions.action)
 
