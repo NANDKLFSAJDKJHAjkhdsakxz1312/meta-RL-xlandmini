@@ -26,7 +26,8 @@ from utils import Transition, calculate_gae, ppo_update_networks, rollout
 from xminigrid.benchmarks import Benchmark
 from xminigrid.environment import Environment, EnvParams
 from xminigrid.wrappers import DirectionObservationWrapper, GymAutoResetWrapper
-
+import os
+os.environ["JAX_PLATFORMS"] = "cpu"
 from new_level_sampler import LevelSampler,make_level_generator,compute_max_returns,compute_score
 import numpy as np
 from enum import IntEnum
@@ -211,7 +212,7 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int = 512
+    num_envs: int = 256
     num_steps_per_env: int = 256
     num_steps_per_update: int = 32
     update_epochs: int = 1
@@ -300,9 +301,10 @@ def make_states(config: TrainConfig):
     )
     # [batch_size, seq_len, ...]
     shapes = env.observation_shape(env_params)
+    
     init_obs = {
-        "obs_img": jnp.zeros((config.num_envs_per_device, 1, *shapes["img"])),
-        "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"])),
+        "obs_img": jnp.zeros((config.num_envs_per_device, 1, *shapes["img"]),dtype=jnp.int32),
+        "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"]),dtype=jnp.int32),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
     }
@@ -415,13 +417,113 @@ def make_train(
                     def _env_step(runner_state, _):
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         
+
+                        
+                        agent_position = prev_timestep.state.agent.position
+                        all_batches_label_obs = jnp.zeros((config.num_envs, *env.observation_shape(env_params)['img']))
+
+                        # 对于批次中的每个样本，使用 jax.lax.fori_loop
+                        def process_batch(batch_index, all_batches_label_obs):
+                            batch = prev_timestep.observation["img"][batch_index]
+                            obs_shape = env.observation_shape(env_params)['img']  # 获取形状
+                            local_obs = jnp.zeros(obs_shape)
+                              # 当前批次的 5*5*2 的 label 数据
+
+                            # 遍历 batch 中的每个像素
+                            def process_pixel(idx, local_obs):
+                                i = idx // batch.shape[1]
+                                j = idx % batch.shape[1]
+                                label = batch[i, j, :]  # 获取 label
+
+                                # 更新 local_obs
+                                local_obs = local_obs.at[i, j, :].set(label)
+
+                                # 定义分支函数
+                                def case_0(local_obs):
+                                    return local_obs.at[i - 4 + agent_position[0], j - 2 + agent_position[1], :].set(label)
+
+                                def case_1(local_obs):
+                                    return local_obs.at[j - 2, -(i - 4), :].set(label)
+
+                                def case_2(local_obs):
+                                    return local_obs.at[-(i - 4), -(j - 2), :].set(label)
+
+                                def case_3(local_obs):
+                                    return local_obs.at[-(j - 2), i - 4, :].set(label)
+
+                                branches = [case_0, case_1, case_2, case_3]
+
+                                # 使用 jax.lax.switch，根据 prev_action[batch_index] 选择对应的函数
+                                action_index = prev_action[batch_index].astype(int)
+                                local_obs = jax.lax.switch(action_index, branches, local_obs)
+
+                                return local_obs
+
+                            num_pixels = batch.shape[0] * batch.shape[1]
+                            local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+
+                            # 更新 all_batches_label_obs
+                            all_batches_label_obs = all_batches_label_obs.at[batch_index].set(local_obs)
+                            return all_batches_label_obs
+
+                        num_batches = prev_timestep.observation["img"].shape[0]
+                        all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
+                        prev_timestep.observation['img'] = all_batches_label_obs
+                        
+
+                        # agent_position = prev_timestep.state.agent.position
+                    
+                        # all_batches_label_obs = jnp.zeros((512, 5, 5, 2))
+
+                        # for batch_index, batch in enumerate(prev_timestep.observation["img"]):
+                        #     local_obs = jnp.zeros((5, 5, 2))  # 用于保存当前批次的5*5*2的label数据
+
+                        #     for i in range(batch.shape[0]):  # 遍历第一个维度
+                        #         for j in range(batch.shape[1]):  # 遍历第二个维度
+                        #             label = batch[i, j, :]  # 取出最后一个维度的两个数字作为label
+
+                        #             # 存储到 local_obs 中，确保所有操作使用 JAX 数组
+                        #             local_obs = local_obs.at[i, j, :].set(label)
+                                    
+                        #             # 根据 prev_action 的值，更新 local_obs 中的其他位置
+                        #             if prev_action[batch_index] == 0:
+                        #                 local_obs = local_obs.at[i - 4 + agent_position[0], j - 2 + agent_position[1], :].set(label)
+                        #             elif prev_action[batch_index] == 1:
+                        #                 local_obs = local_obs.at[j - 2, -(i - 4), :].set(label)
+                        #             elif prev_action[batch_index] == 2:
+                        #                 local_obs = local_obs.at[-(i - 4), -(j - 2), :].set(label)
+                        #             elif prev_action[batch_index] == 3:
+                        #                 local_obs = local_obs.at[-(j - 2), i - 4, :].set(label)
+                            
+                        #     # 将当前批次的local_obs保存到最终的数组中
+                        #     all_batches_label_obs[batch_index] = local_obs
+                       
+                        #     # 最终 all_batches_label_obs 的形状为 512*5*5*2
+                        #     print("最终的所有批次数组形式：")
+                        #     print(all_batches_label_obs.shape)  # 输出形状应该是 (512, 5, 5, 2)
+                            
+#                 return jnp.array([local_obs[0] - 4 + agent_position[0], local_obs[1] - 2 + agent_position[1]])
+            
+#             def case_1():
+#                 global_coord = jnp.array([local_obs[1]-2 ,-(local_obs[0]-4)])
+#                 return global_coord + agent_position
+            
+#             def case_2():
+#                 global_coord = jnp.array([-(local_obs[0]-4), -(local_obs[1]-2)])
+#                 return global_coord + agent_position
+            
+#             def case_3():
+#                 global_coord = jnp.array([ -(local_obs[1]-2),local_obs[0]-4])
+#                 return global_coord + agent_position
+                        
                         # SELECT ACTION
                         rng, _rng = jax.random.split(rng)
                         dist, value, hstate = train_state.apply_fn(
                             train_state.params,
                             {
                                 # [batch_size, seq_len=1, ...]
-                                "obs_img": prev_timestep.observation["img"][:, None],
+                                # "obs_img": prev_timestep.observation["img"][:, None],
+                                "obs_img": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
@@ -465,6 +567,7 @@ def make_train(
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
+                 
     ############
                     # sample_rng = jax.random.PRNGKey(2077)
                     # values = transitions.value
@@ -591,14 +694,62 @@ def make_train(
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
-                        
+                        agent_position = prev_timestep.state.agent.position
+                        all_batches_label_obs = jnp.zeros((config.num_envs, *env.observation_shape(env_params)['img']))
+
+                        # 对于批次中的每个样本，使用 jax.lax.fori_loop
+                        def process_batch(batch_index, all_batches_label_obs):
+                            batch = prev_timestep.observation["img"][batch_index]
+                            obs_shape = env.observation_shape(env_params)['img']  # 获取形状
+                            local_obs = jnp.zeros(obs_shape) # 当前批次的 5*5*2 的 label 数据
+
+                            # 遍历 batch 中的每个像素
+                            def process_pixel(idx, local_obs):
+                                i = idx // batch.shape[1]
+                                j = idx % batch.shape[1]
+                                label = batch[i, j, :]  # 获取 label
+
+                                # 更新 local_obs
+                                local_obs = local_obs.at[i, j, :].set(label)
+
+                                # 定义分支函数
+                                def case_0(local_obs):
+                                    return local_obs.at[i - 4 + agent_position[0], j - 2 + agent_position[1], :].set(label)
+
+                                def case_1(local_obs):
+                                    return local_obs.at[j - 2, -(i - 4), :].set(label)
+
+                                def case_2(local_obs):
+                                    return local_obs.at[-(i - 4), -(j - 2), :].set(label)
+
+                                def case_3(local_obs):
+                                    return local_obs.at[-(j - 2), i - 4, :].set(label)
+
+                                branches = [case_0, case_1, case_2, case_3]
+
+                                # 使用 jax.lax.switch，根据 prev_action[batch_index] 选择对应的函数
+                                action_index = prev_action[batch_index].astype(int)
+                                local_obs = jax.lax.switch(action_index, branches, local_obs)
+
+                                return local_obs
+
+                            num_pixels = batch.shape[0] * batch.shape[1]
+                            local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+
+                            # 更新 all_batches_label_obs
+                            all_batches_label_obs = all_batches_label_obs.at[batch_index].set(local_obs)
+                            return all_batches_label_obs
+
+                        num_batches = prev_timestep.observation["img"].shape[0]
+                        all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
+                        prev_timestep.observation['img'] = all_batches_label_obs
                         # SELECT ACTION
                         rng, _rng = jax.random.split(rng)
                         dist, value, hstate = train_state.apply_fn(
                             train_state.params,
                             {
                                 # [batch_size, seq_len=1, ...]
-                                "obs_img": prev_timestep.observation["img"][:, None],
+                                "obs_img": prev_timestep.observation['img'][:, None],
                                 
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
@@ -632,7 +783,7 @@ def make_train(
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
-    ############    
+                    
                     # sample_rng = jax.random.PRNGKey(2077)
                     # values = transitions.value
                     # rewards = transitions.reward
@@ -659,6 +810,7 @@ def make_train(
                     )
                     advantages, targets = calculate_gae(transitions, last_val.squeeze(1), config.gamma, config.gae_lambda)
     ########        
+                    
                     # jax.debug.print('shape_of_ad:{}',advantages.shape)
                     sampler = train_state.sampler
                     max_returns = compute_max_returns(transitions.done, transitions.reward)

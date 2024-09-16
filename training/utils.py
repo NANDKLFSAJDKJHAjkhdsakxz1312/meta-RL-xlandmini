@@ -61,7 +61,7 @@ def ppo_update_networks(
 ):
     # NORMALIZE ADVANTAGES
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
+    # breakpoint()
     def _loss_fn(params):
         # RERUN NETWORK
         dist, value, _ = train_state.apply_fn(

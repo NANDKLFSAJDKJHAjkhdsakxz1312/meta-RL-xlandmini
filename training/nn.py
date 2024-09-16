@@ -11,7 +11,7 @@ import jax.numpy as jnp
 from flax.linen.dtypes import promote_dtype
 from flax.linen.initializers import glorot_normal, orthogonal, zeros_init
 from flax.typing import Dtype
-
+import numpy as np
 
 from xminigrid.core.constants import NUM_COLORS, NUM_TILES
 from utils_ssp import HexagonalSSPSpace
@@ -272,52 +272,53 @@ class ActorCriticRNN(nn.Module):
                 ),
             ]
         )
-        init_obs = {
-                "obs_img": jnp.zeros((512, 1, 5,5,2)),
-                "obs_dir": jnp.zeros((512, 1,1)),
-                "prev_action": jnp.zeros((512, 1), dtype=jnp.int32),
-                "prev_reward": jnp.zeros((512, 1)),
-            }
-        key = jax.random.PRNGKey(0)
-        step_num = jnp.array(0)
-        grid = jnp.zeros((9, 9))
-        agent = AgentState()
-        goal_encoding = jnp.zeros((10,))
-        rule_encoding = jnp.zeros((10,))
-        carry = EnvCarry()
+        # init_obs = {
+        #         "obs_img": jnp.zeros((512, 1, 5,5,2)),
+        #         "obs_dir": jnp.zeros((512, 1,1)),
+        #         "prev_action": jnp.zeros((512, 1), dtype=jnp.int32),
+        #         "prev_reward": jnp.zeros((512, 1)),
+        #     }
+        # key = jax.random.PRNGKey(0)
+        # step_num = jnp.array(0)
+        # grid = jnp.zeros((9, 9))
+        # agent = AgentState()
+        # goal_encoding = jnp.zeros((10,))
+        # rule_encoding = jnp.zeros((10,))
+        # carry = EnvCarry()
 
-        state = State(
-            key=key,
-            step_num=step_num,
-            grid=grid,
-            agent=agent,
-            goal_encoding=goal_encoding,
-            rule_encoding=rule_encoding,
-            carry=carry
-        )
-
-        
-        step_type = StepType.FIRST
-        reward = jnp.array(1.0)
-        discount = jnp.array(0.99)
-        
+        # state = State(
+        #     key=key,
+        #     step_num=step_num,
+        #     grid=grid,
+        #     agent=agent,
+        #     goal_encoding=goal_encoding,
+        #     rule_encoding=rule_encoding,
+        #     carry=carry
+        # )
 
         
-        timestep = TimeStep(
-            state=state,
-            step_type=step_type,
-            reward=reward,
-            discount=discount,
-            observation=init_obs
-        )
-        timestep = timestep
+        # step_type = StepType.FIRST
+        # reward = jnp.array(1.0)
+        # discount = jnp.array(0.99)
+        
+
+        
+        # timestep = TimeStep(
+        #     state=state,
+        #     step_type=step_type,
+        #     reward=reward,
+        #     discount=discount,
+        #     observation=init_obs
+        # )
+        # timestep = timestep
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
-        obs_emb = img_encoder(inputs['obs_img'], 1015, 5, 9, timestep, jax.random.PRNGKey(0)).astype(jnp.int32).reshape(B, S,-1)
+        obs_emb = img_encoder(inputs['obs_img'], 1015, 5, 9, jax.random.PRNGKey(42)).astype(jnp.int32).reshape(B,S,-1)
+        # obs_emb = jnp.repeat(obs_emb[:, jnp.newaxis, :], 1, axis=1) 
         
         dir_emb = direction_encoder(inputs["obs_dir"])
         act_emb = action_encoder(inputs["prev_action"])
         
-       
+        # breakpoint()
         # [batch_size, seq_len, hidden_dim + 2 * act_emb_dim + 1]
         out = jnp.concatenate(
             [obs_emb, dir_emb, act_emb, inputs["prev_reward"][..., None]], axis=-1
@@ -335,83 +336,79 @@ class ActorCriticRNN(nn.Module):
         return jnp.zeros(
             (batch_size, self.rnn_num_layers, self.rnn_hidden_dim), dtype=self.dtype
         )
-local_obs_dic = {}
+
 global_obs_dic = {}
+from src.xminigrid.core.constants import Tiles,Colors
 
+import jax
+import jax.numpy as jnp
 
+def ssp_encoder(inputs, ssp_dim: int, length_scale: int, env_grid_size: int, rng_key) -> jnp.ndarray:
+    B, S, H, W, _ = inputs.shape  # 包含序列长度 S
 
-def ssp_encoder(inputs, ssp_dim: int, length_scale: int, env_grid_size: int, timestep: TimeStep, rng=jax.random.PRNGKey(0)) -> jax.Array:
-    B = inputs.shape[0]  # 获取批次大小
-    
-    # 初始化 SSP 空间
-    ssp_space = HexagonalSSPSpace(domain_dim=2, ssp_dim=ssp_dim, length_scale=length_scale, 
+    NUM_TILES = len(Tiles.__annotations__)  # 替换为实际的类别数量
+    NUM_COLORS = len(Colors.__annotations__)  # 替换为实际的类别数量
+
+    NUM_CLASSES = NUM_TILES * NUM_COLORS
+
+    # 创建 SSP 空间
+    ssp_space = HexagonalSSPSpace(domain_dim=2, ssp_dim=ssp_dim, length_scale=length_scale,
                                   domain_bounds=jnp.array([[0, env_grid_size], [0, env_grid_size]]))
-    
+
+    # 生成坐标网格
     x_coords, y_coords = jnp.meshgrid(jnp.arange(0, env_grid_size), jnp.arange(0, env_grid_size), indexing='ij')
     coords = jnp.stack((x_coords.flatten(), y_coords.flatten()), axis=-1)
     ssp_grid = ssp_space.encode(coords)
     ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
+
+    # 创建随机向量作为类别向量
+    rng_keys = jax.random.split(rng_key, NUM_CLASSES)
+    label_vectors = jax.vmap(lambda key: jax.random.normal(key, (ssp_dim,)))(rng_keys)  # [NUM_CLASSES, ssp_dim]
+
+    # 创建类别映射数组
+    tile_color_to_class_index_array = -jnp.ones((NUM_TILES, NUM_COLORS), dtype=jnp.int32)
+    index = 0
+    for i in range(NUM_TILES):
+        for j in range(NUM_COLORS):
+            tile_color_to_class_index_array = tile_color_to_class_index_array.at[i, j].set(index)
+            index += 1
     
-    def process_single_sample(input_sample):
-        shape = input_sample.shape  # 获取该批次样本的形状
-        
-        local_obs_coords = []
-        object_labels = []
-        
-        # 将 `inputs` 中的局部坐标和标签转化为 JAX 兼容的形式
-        for idx in itertools.product(range(shape[1]), range(shape[2])):
-            object_label = jnp.array(input_sample[0, idx[0], idx[1], :])
-            object_labels.append(object_label)
-            local_obs_coords.append((idx[0], idx[1]))
-        
-        local_obs_coords = jnp.array(local_obs_coords)  # 转化为 JAX 数组
-        
-        object_labels = jnp.array(object_labels)
-        vocab = spa.Vocabulary(dimensions=ssp_dim, pointer_gen=rng)
-        def ssp_label(object_label):
-            vector = vocab.algebra.create_vector(ssp_dim, properties={"positive", "unitary"})
-            vocab.add(f"{object_label}", vector)
-            return vocab
-        vocab = jax.vmap(ssp_label)(object_labels)
-        # 处理全局坐标并生成对应的 SSP 编码
-        def get_global_obs(local_obs):
-            agent_position = timestep.state.agent.position
-            direction = timestep.state.agent.direction
-            def case_0():
-                return jnp.array([local_obs[0] - 4 + agent_position[0], local_obs[1] - 2 + agent_position[1]])
-            
-            def case_1():
-                global_coord = jnp.array([local_obs[1]-2 ,-(local_obs[0]-4)])
-                return global_coord + agent_position
-            
-            def case_2():
-                global_coord = jnp.array([-(local_obs[0]-4), -(local_obs[1]-2)])
-                return global_coord + agent_position
-            
-            def case_3():
-                global_coord = jnp.array([ -(local_obs[1]-2),local_obs[0]-4])
-                return global_coord + agent_position
+    # 定义处理单个批次和单个时间步的函数
+    def process_single_time_step(single_time_step_inputs):
+        # 获取 tile 和 color 标签
+        tile_labels = single_time_step_inputs[:, :, 0].astype(jnp.int32)  # [H, W]
+        color_labels = single_time_step_inputs[:, :, 1].astype(jnp.int32)  # [H, W]
 
-            return jax.lax.switch(direction, [case_0, case_1, case_2, case_3])
-        
+        # 获取类别索引
+        class_indices = tile_color_to_class_index_array[tile_labels, color_labels]  # [H, W]
 
-        global_obs_coords = jnp.array(jax.vmap(get_global_obs)(local_obs_coords))
-        
-        
-        # 将全局观察字典转换为具体化的 SSP 表示
-        global_env_ssp = jnp.zeros(ssp_dim)
-        for global_coord, object_label in zip(global_obs_coords, object_labels):
-            loc_ssp = ssp_grid[global_coord[0], global_coord[1]]
-            label_ssp = vocab[object_label].v
-            bund_vector = ssp_space.bind(label_ssp, loc_ssp)
-            global_env_ssp += bund_vector.squeeze()
+        x_indices, y_indices = jnp.meshgrid(jnp.arange(H), jnp.arange(W), indexing='ij')  # [H, W]
 
-        return global_env_ssp
+        # 将数组展平
+        class_indices_flat = class_indices.reshape(-1)
+        x_indices_flat = x_indices.reshape(-1)
+        y_indices_flat = y_indices.reshape(-1)
 
-    # 使用 `vmap` 并行处理每个批次的样本
-    global_env_ssp_batch = jax.vmap(process_single_sample)(inputs)
+        label_ssp = label_vectors[class_indices_flat]  # [H*W, ssp_dim]
+        loc_ssp = ssp_grid[x_indices_flat, y_indices_flat]  # [H*W, ssp_dim]
+
+        # 绑定位置和类别向量
+        bund_vectors = ssp_space.bind(label_ssp, loc_ssp)  # [H*W, ssp_dim]
+
+        # 对所有绑定向量求和
+        env_ssp = jnp.sum(bund_vectors, axis=0)  # [ssp_dim]
+
+        return env_ssp
+
+    # 处理所有批次和时间步
+    global_env_ssp = jax.vmap(jax.vmap(process_single_time_step))(inputs)  # [B, S, ssp_dim]
+
+    return global_env_ssp
+
+
+ 
+
     
-    return global_env_ssp_batch
 
 def return_ssp_encoder():
     return ssp_encoder
