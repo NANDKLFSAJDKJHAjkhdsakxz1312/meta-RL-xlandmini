@@ -31,7 +31,7 @@ os.environ["JAX_PLATFORMS"] = "cpu"
 from new_level_sampler import LevelSampler,make_level_generator,compute_max_returns,compute_score
 import numpy as np
 from enum import IntEnum
-
+import jax.profiler
 from utils_ssp import HexagonalSSPSpace
 from src.xminigrid.types import TimeStep, State, AgentState, EnvCarry, StepType
 
@@ -415,6 +415,8 @@ def make_train(
                 def _update_step(runner_state, _):
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
+                        jax.profiler.start_trace("/tmp/jax_trace")
+                        start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         
 
@@ -562,6 +564,9 @@ def make_train(
                         
 
                         runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
+                        end_time = time.time()  # 结束计时
+                        print(f"_env_step took {end_time - start_time:.4f} seconds")
+                        jax.profiler.stop_trace()  # 停止性能分析
                         return runner_state, transition
 
                     initial_hstate = runner_state[-1]
@@ -693,6 +698,8 @@ def make_train(
                 def _update_step(runner_state, _):
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
+                        jax.profiler.start_trace("/tmp/jax_trace")
+                        start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         agent_position = prev_timestep.state.agent.position
                         all_batches_label_obs = jnp.zeros((config.num_envs, *env.observation_shape(env_params)['img']))
@@ -778,6 +785,9 @@ def make_train(
                             prev_reward=prev_reward,
                         )
                         runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
+                        end_time = time.time()  # 结束计时
+                        print(f"_env_step took {end_time - start_time:.4f} seconds")
+                        jax.profiler.stop_trace()  # 停止性能分析
                         return runner_state, transition
 
                     initial_hstate = runner_state[-1]

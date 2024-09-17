@@ -343,35 +343,101 @@ from src.xminigrid.core.constants import Tiles,Colors
 import jax
 import jax.numpy as jnp
 
+# def ssp_encoder(inputs, ssp_dim: int, length_scale: int, env_grid_size: int, rng_key) -> jnp.ndarray:
+#     B, S, H, W, _ = inputs.shape  # 包含序列长度 S
+
+#     NUM_TILES = len(Tiles.__annotations__)  # 替换为实际的类别数量
+#     NUM_COLORS = len(Colors.__annotations__)  # 替换为实际的类别数量
+
+#     NUM_CLASSES = NUM_TILES * NUM_COLORS
+
+#     # 创建 SSP 空间
+#     ssp_space = HexagonalSSPSpace(domain_dim=2, ssp_dim=ssp_dim, length_scale=length_scale,
+#                                   domain_bounds=jnp.array([[0, env_grid_size], [0, env_grid_size]]))
+
+#     # 生成坐标网格
+#     x_coords, y_coords = jnp.meshgrid(jnp.arange(0, env_grid_size), jnp.arange(0, env_grid_size), indexing='ij')
+#     coords = jnp.stack((x_coords.flatten(), y_coords.flatten()), axis=-1)
+#     ssp_grid = ssp_space.encode(coords)
+#     ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
+
+#     # 创建随机向量作为类别向量
+#     rng_keys = jax.random.split(rng_key, NUM_CLASSES)
+#     label_vectors = jax.vmap(lambda key: jax.random.normal(key, (ssp_dim,)))(rng_keys)  # [NUM_CLASSES, ssp_dim]
+
+#     # 创建类别映射数组
+#     tile_color_to_class_index_array = -jnp.ones((NUM_TILES, NUM_COLORS), dtype=jnp.int32)
+#     index = 0
+#     for i in range(NUM_TILES):
+#         for j in range(NUM_COLORS):
+#             tile_color_to_class_index_array = tile_color_to_class_index_array.at[i, j].set(index)
+#             index += 1
+    
+#     # 定义处理单个批次和单个时间步的函数
+#     def process_single_time_step(single_time_step_inputs):
+#         # 获取 tile 和 color 标签
+#         tile_labels = single_time_step_inputs[:, :, 0].astype(jnp.int32)  # [H, W]
+#         color_labels = single_time_step_inputs[:, :, 1].astype(jnp.int32)  # [H, W]
+
+#         # 获取类别索引
+#         class_indices = tile_color_to_class_index_array[tile_labels, color_labels]  # [H, W]
+
+#         x_indices, y_indices = jnp.meshgrid(jnp.arange(H), jnp.arange(W), indexing='ij')  # [H, W]
+
+#         # 将数组展平
+#         class_indices_flat = class_indices.reshape(-1)
+#         x_indices_flat = x_indices.reshape(-1)
+#         y_indices_flat = y_indices.reshape(-1)
+
+#         label_ssp = label_vectors[class_indices_flat]  # [H*W, ssp_dim]
+#         loc_ssp = ssp_grid[x_indices_flat, y_indices_flat]  # [H*W, ssp_dim]
+
+#         # 绑定位置和类别向量
+#         bund_vectors = ssp_space.bind(label_ssp, loc_ssp)  # [H*W, ssp_dim]
+
+#         # 对所有绑定向量求和
+#         env_ssp = jnp.sum(bund_vectors, axis=0)  # [ssp_dim]
+
+#         return env_ssp
+
+#     # 处理所有批次和时间步
+#     global_env_ssp = jax.vmap(jax.vmap(process_single_time_step))(inputs)  # [B, S, ssp_dim]
+
+#     return global_env_ssp
+
+NUM_TILES = len(Tiles.__annotations__)  # 替换为实际的类别数量
+NUM_COLORS = len(Colors.__annotations__)  # 替换为实际的类别数量
+
+NUM_CLASSES = NUM_TILES * NUM_COLORS
+ssp_dim = 1015
+length_scale = 5
+env_grid_size = 9
+rng_key = jax.random.PRNGKey(0)
+# 创建 SSP 空间
+ssp_space = HexagonalSSPSpace(domain_dim=2, ssp_dim=ssp_dim, length_scale=length_scale,
+                                domain_bounds=jnp.array([[0, env_grid_size], [0, env_grid_size]]))
+
+# 生成坐标网格
+x_coords, y_coords = jnp.meshgrid(jnp.arange(0, env_grid_size), jnp.arange(0, env_grid_size), indexing='ij')
+coords = jnp.stack((x_coords.flatten(), y_coords.flatten()), axis=-1)
+ssp_grid = ssp_space.encode(coords)
+ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
+
+# 创建随机向量作为类别向量
+rng_keys = jax.random.split(rng_key, NUM_CLASSES)
+label_vectors = jax.vmap(lambda key: jax.random.normal(key, (ssp_dim,)))(rng_keys)  # [NUM_CLASSES, ssp_dim]
+
+# 创建类别映射数组
+tile_color_to_class_index_array = -jnp.ones((NUM_TILES, NUM_COLORS), dtype=jnp.int32)
+index = 0
+for i in range(NUM_TILES):
+    for j in range(NUM_COLORS):
+        tile_color_to_class_index_array = tile_color_to_class_index_array.at[i, j].set(index)
+        index += 1
 def ssp_encoder(inputs, ssp_dim: int, length_scale: int, env_grid_size: int, rng_key) -> jnp.ndarray:
     B, S, H, W, _ = inputs.shape  # 包含序列长度 S
 
-    NUM_TILES = len(Tiles.__annotations__)  # 替换为实际的类别数量
-    NUM_COLORS = len(Colors.__annotations__)  # 替换为实际的类别数量
-
-    NUM_CLASSES = NUM_TILES * NUM_COLORS
-
-    # 创建 SSP 空间
-    ssp_space = HexagonalSSPSpace(domain_dim=2, ssp_dim=ssp_dim, length_scale=length_scale,
-                                  domain_bounds=jnp.array([[0, env_grid_size], [0, env_grid_size]]))
-
-    # 生成坐标网格
-    x_coords, y_coords = jnp.meshgrid(jnp.arange(0, env_grid_size), jnp.arange(0, env_grid_size), indexing='ij')
-    coords = jnp.stack((x_coords.flatten(), y_coords.flatten()), axis=-1)
-    ssp_grid = ssp_space.encode(coords)
-    ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
-
-    # 创建随机向量作为类别向量
-    rng_keys = jax.random.split(rng_key, NUM_CLASSES)
-    label_vectors = jax.vmap(lambda key: jax.random.normal(key, (ssp_dim,)))(rng_keys)  # [NUM_CLASSES, ssp_dim]
-
-    # 创建类别映射数组
-    tile_color_to_class_index_array = -jnp.ones((NUM_TILES, NUM_COLORS), dtype=jnp.int32)
-    index = 0
-    for i in range(NUM_TILES):
-        for j in range(NUM_COLORS):
-            tile_color_to_class_index_array = tile_color_to_class_index_array.at[i, j].set(index)
-            index += 1
+    
     
     # 定义处理单个批次和单个时间步的函数
     def process_single_time_step(single_time_step_inputs):
@@ -404,8 +470,6 @@ def ssp_encoder(inputs, ssp_dim: int, length_scale: int, env_grid_size: int, rng
     global_env_ssp = jax.vmap(jax.vmap(process_single_time_step))(inputs)  # [B, S, ssp_dim]
 
     return global_env_ssp
-
-
  
 
     
