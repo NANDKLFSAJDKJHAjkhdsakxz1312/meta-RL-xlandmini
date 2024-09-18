@@ -187,41 +187,41 @@ class ActorCriticRNN(nn.Module):
                 ]
             )
         else:
-            # img_encoder = nn.Sequential(
-            #     [
-            #         # For small dims nn.Embed is extremely slow in bf16, so we leave everything in default dtypes
-            #         EmbeddingEncoder(emb_dim=self.obs_emb_dim),
-            #         nn.Conv(
-            #             16,
-            #             (2, 2),
-            #             padding="VALID",
-            #             kernel_init=orthogonal(math.sqrt(2)),
-            #             dtype=self.dtype,
-            #             param_dtype=self.param_dtype,
-            #         ),
-            #         nn.relu,
-            #         nn.Conv(
-            #             32,
-            #             (2, 2),
-            #             padding="VALID",
-            #             kernel_init=orthogonal(math.sqrt(2)),
-            #             dtype=self.dtype,
-            #             param_dtype=self.param_dtype,
-            #         ),
-            #         nn.relu,
-            #         nn.Conv(
-            #             64,
-            #             (2, 2),
-            #             padding="VALID",
-            #             kernel_init=orthogonal(math.sqrt(2)),
-            #             dtype=self.dtype,
-            #             param_dtype=self.param_dtype,
-            #         ),
-            #         nn.relu,
-            #     ]
-            # )
+            img_encoder = nn.Sequential(
+                [
+                    # For small dims nn.Embed is extremely slow in bf16, so we leave everything in default dtypes
+                    EmbeddingEncoder(emb_dim=self.obs_emb_dim),
+                    nn.Conv(
+                        16,
+                        (2, 2),
+                        padding="VALID",
+                        kernel_init=orthogonal(math.sqrt(2)),
+                        dtype=self.dtype,
+                        param_dtype=self.param_dtype,
+                    ),
+                    nn.relu,
+                    nn.Conv(
+                        32,
+                        (2, 2),
+                        padding="VALID",
+                        kernel_init=orthogonal(math.sqrt(2)),
+                        dtype=self.dtype,
+                        param_dtype=self.param_dtype,
+                    ),
+                    nn.relu,
+                    nn.Conv(
+                        64,
+                        (2, 2),
+                        padding="VALID",
+                        kernel_init=orthogonal(math.sqrt(2)),
+                        dtype=self.dtype,
+                        param_dtype=self.param_dtype,
+                    ),
+                    nn.relu,
+                ]
+            )
             
-            img_encoder = return_ssp_encoder()
+            # img_encoder = return_ssp_encoder()
             
             
             # img_encoder = jax.vmap(
@@ -311,8 +311,8 @@ class ActorCriticRNN(nn.Module):
         #     observation=init_obs
         # )
         # timestep = timestep
-        # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
-        obs_emb = img_encoder(inputs['obs_img'], 1015, 5, 9, jax.random.PRNGKey(42)).astype(jnp.int32).reshape(B,S,-1)
+        obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
+        # obs_emb = img_encoder(inputs['obs_img'], 1015, 5, 9, jax.random.PRNGKey(42)).astype(jnp.int32).reshape(B,S,-1)
         # obs_emb = jnp.repeat(obs_emb[:, jnp.newaxis, :], 1, axis=1) 
         
         dir_emb = direction_encoder(inputs["obs_dir"])

@@ -27,7 +27,7 @@ from xminigrid.benchmarks import Benchmark
 from xminigrid.environment import Environment, EnvParams
 from xminigrid.wrappers import DirectionObservationWrapper, GymAutoResetWrapper
 import os
-os.environ["JAX_PLATFORMS"] = "cpu"
+
 from new_level_sampler import LevelSampler,make_level_generator,compute_max_returns,compute_score
 import numpy as np
 from enum import IntEnum
@@ -200,7 +200,7 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "meta-task-ppo_plr_maxmc_as_score_func"
+    name: str = "cnn_local"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
@@ -216,8 +216,8 @@ class TrainConfig:
     num_steps_per_env: int = 256
     num_steps_per_update: int = 32
     update_epochs: int = 1
-    num_minibatches: int = 1
-    total_timesteps: int = 9_00_0000
+    num_minibatches: int = 2
+    total_timesteps: int = 3_00_0000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -415,8 +415,8 @@ def make_train(
                 def _update_step(runner_state, _):
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
-                        jax.profiler.start_trace("/tmp/jax_trace")
-                        start_time = time.time()
+                        # jax.profiler.start_trace("/tmp/jax_trace")
+                        # start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         
 
@@ -564,9 +564,9 @@ def make_train(
                         
 
                         runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
-                        end_time = time.time()  # 结束计时
+                        # end_time = time.time()  # 结束计时
                         print(f"_env_step took {end_time - start_time:.4f} seconds")
-                        jax.profiler.stop_trace()  # 停止性能分析
+                        # jax.profiler.stop_trace()  # 停止性能分析
                         return runner_state, transition
 
                     initial_hstate = runner_state[-1]
@@ -698,8 +698,8 @@ def make_train(
                 def _update_step(runner_state, _):
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
-                        jax.profiler.start_trace("/tmp/jax_trace")
-                        start_time = time.time()
+                        # jax.profiler.start_trace("/tmp/jax_trace")
+                        # start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         agent_position = prev_timestep.state.agent.position
                         all_batches_label_obs = jnp.zeros((config.num_envs, *env.observation_shape(env_params)['img']))
@@ -785,9 +785,9 @@ def make_train(
                             prev_reward=prev_reward,
                         )
                         runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
-                        end_time = time.time()  # 结束计时
+                        # end_time = time.time()  # 结束计时
                         print(f"_env_step took {end_time - start_time:.4f} seconds")
-                        jax.profiler.stop_trace()  # 停止性能分析
+                        # jax.profiler.stop_trace()  # 停止性能分析
                         return runner_state, transition
 
                     initial_hstate = runner_state[-1]
