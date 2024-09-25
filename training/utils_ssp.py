@@ -568,7 +568,7 @@ class SSPSpace:
         return sample_ssps, sample_points
 
     def normalize(self, ssp):
-        return ssp / np.maximum(np.sqrt(np.sum(ssp**2)), 1e-8)
+        return ssp / jnp.maximum(jnp.sqrt(jnp.sum(ssp**2)), 1e-8)
 
     def make_unitary(self, ssp):
         fssp = np.fft.fft(ssp)
