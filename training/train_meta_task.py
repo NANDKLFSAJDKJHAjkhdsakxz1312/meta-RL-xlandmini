@@ -210,7 +210,7 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int = 2048
+    num_envs: int = 256
     num_steps_per_env: int = 4096
     num_steps_per_update: int = 32
     update_epochs: int = 1
@@ -589,16 +589,17 @@ def make_train(
                         # STEP ENV
                         timestep = jax.vmap(env.step, in_axes=0)(meta_env_params, prev_timestep, action)
                         transition = Transition(
-                            # ATTENTION: done is always false, as we optimize for entire meta-rollout
-                            done=jnp.zeros_like(timestep.last()),
-                            action=action,
-                            value=value,
-                            reward=timestep.reward,
-                            log_prob=log_prob,
-                            obs=prev_timestep.observation,
-                            prev_action=prev_action,
-                            prev_reward=prev_reward,
-                        )
+                        # ATTENTION: done is always false, as we optimize for entire meta-rollout
+                        done=jnp.zeros_like(timestep.last()),
+                        action=action,
+                        value=value,
+                        reward=timestep.reward,
+                        log_prob=log_prob,
+                        obs=prev_timestep.observation["img"],
+                        dir=prev_timestep.observation["direction"],
+                        prev_action=prev_action,
+                        prev_reward=prev_reward,
+                    )
                         runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
                         return runner_state, transition
 
@@ -621,7 +622,8 @@ def make_train(
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "observation": timestep.observation[:, None],
+                            "obs_img": timestep.observation["img"][:, None],
+                            "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
                         },
