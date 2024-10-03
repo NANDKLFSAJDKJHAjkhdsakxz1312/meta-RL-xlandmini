@@ -210,12 +210,12 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int = 256
-    num_steps_per_env: int = 256
+    num_envs: int = 2048
+    num_steps_per_env: int = 4096
     num_steps_per_update: int = 32
     update_epochs: int = 1
     num_minibatches: int = 16
-    total_timesteps: int = 3_00_00000
+    total_timesteps: int = 100_000_000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -271,6 +271,7 @@ def make_states(config: TrainConfig):
         raise ValueError("Only meta-task environments are supported.")
 
     env, env_params = xminigrid.make(config.env_id)
+    env_params = env_params.replace(view_size=17)
     env = GymAutoResetWrapper(env)
     env = DirectionObservationWrapper(env)
 
@@ -572,12 +573,13 @@ def make_train(
                         rng, _rng = jax.random.split(rng)
                         dist, value, hstate = train_state.apply_fn(
                             train_state.params,
-                            {
-                                # [batch_size, seq_len=1, ...]
-                                "observation": prev_timestep.observation[:, None],
-                                "prev_action": prev_action[:, None],
-                                "prev_reward": prev_reward[:, None],
-                            },
+                           {
+                            # [batch_size, seq_len=1, ...]
+                            "obs_img": prev_timestep.observation["img"][:, None],
+                            "obs_dir": prev_timestep.observation["direction"][:, None],
+                            "prev_action": prev_action[:, None],
+                            "prev_reward": prev_reward[:, None],
+                        },
                             prev_hstate,
                         )
                         action, log_prob = dist.sample_and_log_prob(seed=_rng)
@@ -870,4 +872,3 @@ def train(config: TrainConfig):
 
 if __name__ == "__main__":
     train()
-
