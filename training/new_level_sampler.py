@@ -325,7 +325,7 @@ class LevelSampler:
             
             temperature = prioritization_params["temperature"]
             w_s = jnp.where(mask, 1 / ranks, 0) ** (1 / temperature)
-            jax.debug.breakpoint()
+            # jax.debug.breakpoint()
             w_s = w_s / w_s.sum()
             
         elif prioritization == "topk":

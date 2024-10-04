@@ -198,7 +198,7 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "meta-task-ppo_plr_maxmc_as_score_func"
+    name: str = "global_plr"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
@@ -210,7 +210,7 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int = 256
+    num_envs: int = 2048
     num_steps_per_env: int = 4096
     num_steps_per_update: int = 32
     update_epochs: int = 1
