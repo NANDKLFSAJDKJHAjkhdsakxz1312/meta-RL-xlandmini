@@ -271,7 +271,7 @@ class ActorCriticRNN(nn.Module):
         )
         
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
-        obs_emb = img_encoder(inputs['obs_img']).reshape(B,S,-1)
+        obs_emb = img_encoder(inputs['obs_img']).reshape(B, S, -1)
         
         # obs_emb = jnp.repeat(obs_emb[:, jnp.newaxis, :], 1, axis=1) 
         # jax.debug.print("obs_emb: {img}", img=obs_emb)

@@ -201,7 +201,7 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "cnn_local"
+    name: str = "ssp_plr"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
@@ -213,12 +213,12 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int =1
-    num_steps_per_env: int = 2
-    num_steps_per_update: int = 2
+    num_envs: int =2048
+    num_steps_per_env: int = 4096
+    num_steps_per_update: int = 32
     update_epochs: int = 1
-    num_minibatches: int = 1
-    total_timesteps: int = 2
+    num_minibatches: int = 16
+    total_timesteps: int = 100_000_000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -248,6 +248,7 @@ class TrainConfig:
         self.num_envs_per_device = self.num_envs // num_devices
         self.total_timesteps_per_device = self.total_timesteps // num_devices
         self.eval_num_envs_per_device = self.eval_num_envs // num_devices
+      
         assert self.num_envs % num_devices == 0
         self.num_meta_updates = round(
             self.total_timesteps_per_device / (self.num_envs_per_device * self.num_steps_per_env)
@@ -496,10 +497,10 @@ def make_train(
 
                         all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
 
-                        jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
+                        # jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
 
                         prev_timestep.observation['img'] = all_batches_label_obs
-                        jax.debug.print('after:{x}', x = prev_timestep.observation['img'])
+                        # jax.debug.print('after:{x}', x = prev_timestep.observation['img'])
                         rng, _rng = jax.random.split(rng)
                         dist, value, hstate = train_state.apply_fn(
                             train_state.params,
@@ -830,10 +831,10 @@ def make_train(
 
                         all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
 
-                        jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
+                        # jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
 
                         prev_timestep.observation['img'] = all_batches_label_obs
-                        jax.debug.print('after:{x}', x = prev_timestep.observation['img'])
+                        # jax.debug.print('after:{x}', x = prev_timestep.observation['img'])
                        
                         # SELECT ACTION
                         rng, _rng = jax.random.split(rng)
@@ -1136,13 +1137,13 @@ def train(config: TrainConfig):
 
     # logging to wandb
 
-    # run = wandb.init(
-    #     project=config.project,
-    #     group=config.group,
-    #     name=config.name,
-    #     config=asdict(config),
-    #     save_code=True,
-    # )
+    run = wandb.init(
+        project=config.project,
+        group=config.group,
+        name=config.name,
+        config=asdict(config),
+        save_code=True,
+    )
     # removing existing checkpoints if any
     if config.checkpoint_path is not None and os.path.exists(config.checkpoint_path):
         shutil.rmtree(config.checkpoint_path)
@@ -1197,27 +1198,27 @@ def train(config: TrainConfig):
     for i in range(config.num_meta_updates):
         total_transitions += config.num_steps_per_env * config.num_envs_per_device * jax.local_device_count()
         info = jtu.tree_map(lambda x: x[i].item(), loss_info)
-        levels = levels_info.tolist()
-        scores = scores_info.tolist()
+        # levels = levels_info.tolist()
+        # scores = scores_info.tolist()
         info["transitions"] = total_transitions
         # info["levels"] = levels
         # info["scores"] = scores
         
-        # wandb.log(info)
+        wandb.log(info)
     
     
 
-    # run.summary["training_time"] = elapsed_time
-    # run.summary["steps_per_second"] = (config.total_timesteps_per_device * jax.local_device_count()) / elapsed_time
+    run.summary["training_time"] = elapsed_time
+    run.summary["steps_per_second"] = (config.total_timesteps_per_device * jax.local_device_count()) / elapsed_time
 
-    # if config.checkpoint_path is not None:
-    #     checkpoint = {"config": asdict(config), "params": unreplicate(train_info)["state"].params}
-    #     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-    #     save_args = orbax_utils.save_args_from_target(checkpoint)
-    #     orbax_checkpointer.save(config.checkpoint_path, checkpoint, save_args=save_args)
+    if config.checkpoint_path is not None:
+        checkpoint = {"config": asdict(config), "params": unreplicate(train_info)["state"].params}
+        orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+        save_args = orbax_utils.save_args_from_target(checkpoint)
+        orbax_checkpointer.save(config.checkpoint_path, checkpoint, save_args=save_args)
 
-    # print("Final return: ", float(loss_info["eval/returns_mean"][-1]))
-    # run.finish()
+    print("Final return: ", float(loss_info["eval/returns_mean"][-1]))
+    run.finish()
 
 
 if __name__ == "__main__":
