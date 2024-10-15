@@ -210,12 +210,12 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int = 2048
-    num_steps_per_env: int = 4096
+    num_envs: int = 512
+    num_steps_per_env: int = 1024
     num_steps_per_update: int = 32
     update_epochs: int = 1
     num_minibatches: int = 16
-    total_timesteps: int = 100_000_000
+    total_timesteps: int = 100_000_00
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -737,6 +737,11 @@ def make_train(
 
             # averaging over inner updates, adding evaluation metrics
             loss_info = jtu.tree_map(lambda x: x.mean(-1), loss_info)
+            idx = jnp.arange(level_sampler.capacity) < train_state.sampler["size"]  # 判断哪些关卡已填充
+            mean_score = (train_state.sampler["scores"] * idx).sum() / idx.sum()  # 只对已填充的关卡求均值
+
+            weights = level_sampler.level_weights(train_state.sampler)  # 获取每个关卡的权重
+            weighted_score = (train_state.sampler["scores"] * weights).sum()  # 计算加权分数的总和
             loss_info.update(
                 {
                     "eval/returns_mean": eval_stats.reward.mean(0),
@@ -746,12 +751,15 @@ def make_train(
                     "eval/returns_20percentile": jnp.percentile(eval_stats.reward, q=20),
                     "lr": train_state.opt_state[-1].hyperparams["learning_rate"],
                     "levels":train_state.sampler["levels"].mean(),
-                    "scores":train_state.sampler["scores"].mean()
+                    "mean_scores":mean_score,
+                    "max_scores":train_state.sampler["scores"].max(),
+                    "weighted_scores":weighted_score
+                    
                 }
             )
             meta_state = (rng, train_state)
             jax.debug.print('scores:{}',train_state.sampler["scores"])
-            jax.debug.print('scores_mean:{}',train_state.sampler["scores"].mean())
+            jax.debug.print('scores_mean:{}',mean_score)
             return meta_state, loss_info
 
         meta_state = (rng, train_state)
