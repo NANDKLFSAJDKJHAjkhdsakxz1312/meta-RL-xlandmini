@@ -8,7 +8,7 @@ import jax.numpy as jnp
 
 
 class SPSpace:
-    r"""Class for Semantic Pointer (SP) representation mapping
+    """Class for Semantic Pointer (SP) representation mapping
 
     This is similar to nengo_spa vocabs but structured differently.
 
