@@ -203,7 +203,7 @@ class TrainConfig:
     group: str = "default"
     name: str = "ssp_plr"
     env_id: str = "XLand-MiniGrid-R1-9x9"
-    benchmark_id: str = "trivial-1m"
+    benchmark_id: str = "medium-1m"
     img_obs: bool = False 
     # agent
     obs_emb_dim: int = 16
@@ -213,12 +213,12 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int =2048
-    num_steps_per_env: int = 4096
-    num_steps_per_update: int = 32
+    num_envs: int =4
+    num_steps_per_env: int = 4
+    num_steps_per_update: int = 4
     update_epochs: int = 1
-    num_minibatches: int = 16
-    total_timesteps: int = 100_000_000
+    num_minibatches: int = 1
+    total_timesteps: int = 16
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -522,7 +522,7 @@ def make_train(
 
                         # STEP ENV
                         timestep = jax.vmap(env.step, in_axes=0)(meta_env_params, prev_timestep, action)
-                      
+
                         transition = Transition(
                             # ATTENTION: done is always false, as we optimize for entire meta-rollout
                             done=jnp.zeros_like(timestep.last()),
@@ -759,7 +759,9 @@ def make_train(
                         # jax.profiler.start_trace("/tmp/jax_trace")
                         # start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
-                        
+                        jax.debug.print("rule:{x}",x=prev_timestep.state.rule_encoding)
+                        jax.debug.print("goal:{x}",x=prev_timestep.state.goal_encoding)
+                        jax.debug.print("obs:{x}",x=prev_timestep.observation["img"])
                         all_batches_label_obs = jnp.zeros((config.num_envs, 9,9,2),dtype=jnp.uint8)
 
                         # 对于批次中的每个样本，使用 jax.lax.fori_loop
