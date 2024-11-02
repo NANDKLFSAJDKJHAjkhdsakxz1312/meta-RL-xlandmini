@@ -329,8 +329,8 @@ x_coords, y_coords = jnp.meshgrid(jnp.arange(0, env_grid_size), jnp.arange(0, en
 coords = jnp.stack((x_coords.flatten(), y_coords.flatten()), axis=-1)
 ssp_grid = ssp_space.encode(coords)
 
-# ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
 
+ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
 # 创建随机向量作为类别向量
 CLASS_LST = [f"TILE_{i}_COLOR_{j}" for i in range(NUM_TILES) for j in range(NUM_COLORS)]
 
@@ -344,6 +344,7 @@ for i, class_name in enumerate(CLASS_LST):
 
 vocab_vectors = jnp.array(vocab.vectors)
 
+
 # rng_keys = jax.random.split(RNG, NUM_CLASSES)
 # label_vectors = jax.vmap(lambda key: jax.random.normal(key, (ssp_dim,)))(rng_keys)  # [NUM_CLASSES, ssp_dim]
 
@@ -354,7 +355,6 @@ for i in range(NUM_TILES):
     for j in range(NUM_COLORS):
         tile_color_to_class_index_array = tile_color_to_class_index_array.at[i, j].set(index)
         index += 1
-
 
 # def ssp_encoder(inputs) -> jnp.ndarray:
     
@@ -416,7 +416,7 @@ for i in range(NUM_TILES):
 #                     return (carry + bund_vector, count_binds)
 
 #                 # 仅当 class_index 不为 -1 时进行绑定
-#                 carry, count_binds = jax.lax.cond((class_index != 200) & (class_index != 19)&(class_index != 30), bind_fn, lambda carry_and_counts: carry_and_counts, (carry, count_binds))
+#                 carry, count_binds = jax.lax.cond((class_index == 37) | (class_index == 138) | (class_index ==40 ) | (class_index ==78 ), bind_fn, lambda carry_and_counts: carry_and_counts, (carry, count_binds))
                 
 #                 return (carry, count_binds ), None  # 返回 carry 作为结果，用于保存每个时间步的 SSP 向量
 
@@ -448,12 +448,108 @@ for i in range(NUM_TILES):
     
 #     return global_env_ssp
 
+# def ssp_encoder(inputs) -> jnp.ndarray:
+#     B, S, H, W, _ = inputs.shape  # 包含序列长度 S
+    
+#     def process_single_batch(batch_inputs):
+#         # 初始化累加的 SSP 向量为全 0
+#         init_carry = jnp.zeros((ssp_grid.shape[2],))  # [ssp_dim]
+        
+#         # 定义处理单个时间步的函数
+#         def process_single_time_step(carry, single_time_step_inputs):
+#             # 获取 tile 和 color 标签
+#             tile_labels = single_time_step_inputs[..., 0].astype(jnp.int32)  # [H, W]
+#             color_labels = single_time_step_inputs[..., 1].astype(jnp.int32)  # [H, W]
+#             # jax.debug.print("tile:{x}",x=tile_labels)
+#             # jax.debug.print("color:{x}",x=color_labels)
+
+#             # 创建掩码来标识有效位置
+#             valid_mask = (tile_labels != 0) & (color_labels != 0) &(tile_labels!=1) &(tile_labels!=2)# [H, W]
+#             # jax.debug.print("vec:{x}",x=vocab_vectors)
+#             # jax.debug.print("sspgrid:{x}",x=ssp_grid.reshape(H, W, -1))
+#             # jax.debug.print("mask:{x}",x=valid_mask[..., None])
+            
+#             # jax.debug.print("mask:{x}",x=vocab_vectors[idx])
+#             # 获取所有有效位置的 class_indices（无效位置标记为 0 向量）
+#             class_indices = tile_color_to_class_index_array[tile_labels, color_labels]
+#             label_ssps = jnp.where(
+#                 valid_mask[..., None], 
+#                 vocab_vectors[class_indices],  # 有效位置的向量
+#                 jnp.zeros((H, W, ssp_grid.shape[2]))  # 无效位置为零向量
+#             )  # [H, W, ssp_dim]
+#             # jax.debug.print("class_indices:{x}",x=class_indices)
+#             # jax.debug.print("label_ssps:{x}",x=label_ssps)
+
+#             # 从 ssp_grid 中获取位置向量
+#             loc_ssps = jnp.where(
+#                 valid_mask[..., None], 
+#                 ssp_grid,  # 有效位置的坐标向量
+#                 jnp.zeros((H, W, ssp_grid.shape[2]))  # 无效位置为零向量
+#             )  # [H, W, ssp_dim]
+#             # jax.debug.print("loc_ssps:{x}",x=loc_ssps)
+#             # jax.debug.print("y:{x}",x=ssp_grid[11])
+#             idx = tile_color_to_class_index_array[6,6]
+#             x = ssp_space.bind(vocab_vectors[idx],ssp_grid[1,2])
+#             # jax.debug.print("selectedvec_6,6:{y}",y=ssp_grid[1,2])
+#             idx = tile_color_to_class_index_array[11,6]
+#             # jax.debug.print("selectedvec_11,6:{y}",y=ssp_grid[6,3])
+
+#             x+=ssp_space.bind(vocab_vectors[idx],ssp_grid[6,3])
+#             idx = tile_color_to_class_index_array[3,1]
+#             # jax.debug.print("selectedvec_3,1:{y}",y=ssp_grid[2,3])
+
+#             x+=ssp_space.bind(vocab_vectors[idx],ssp_grid[2,3])
+#             idx = tile_color_to_class_index_array[3,4]
+#             # jax.debug.print("selectedvec_3,4:{y}",y=ssp_grid[2,4])
+
+#             x+=ssp_space.bind(vocab_vectors[idx],ssp_grid[2,4])
+            
+            
+#             # jax.debug.print("x:{y}",y=x.squeeze())
+#             # 对标签向量和位置向量进行绑定操作
+#             # binding_vectors = ssp_space.bind(label_ssps, loc_ssps)  # [H, W, ssp_dim]
+#             binding_vectors = jnp.where(
+#             valid_mask[..., None], 
+#             ssp_space.bind(label_ssps, loc_ssps),  # 只对有效位置绑定
+#             jnp.zeros_like(label_ssps)  # 无效位置保持为零
+#             )
+#             # jax.debug.print("bundvec:{x}",x=jnp.where(valid_mask[...,None],label_ssps,jnp.zeros_like(label_ssps)))
+#             # for i in range(ssp_grid.shape[0]):
+#             #     for j in range(ssp_grid.shape[1]):
+#             #         # 获取每个位置的向量
+#             #         vector =ssp_grid[i, j]
+#             #         # 打印位置和对应的向量
+#             #         jax.debug.print("位置 ({i}, {j}) 的向量: {x}", i=i, j=j, x=vector)
+            
+#             # 累加所有有效位置的绑定向量
+#             carry = carry + binding_vectors.sum(axis=(0, 1))  # [ssp_dim]
+        
+#             # carry = carry + x.squeeze() # [ssp_dim]
+#             return x.squeeze(),x.squeeze()  # 返回 carry 作为结果，用于保存每个时间步的 SSP 向量
+
+#         # 使用 scan 来处理该 batch 中的所有时间步
+#         final_carry, ssp_vectors = jax.lax.scan(
+#             process_single_time_step, 
+#             init_carry, 
+#             batch_inputs
+#         )
+#         jax.debug.print("ssp_vectors:{y}",y=ssp_vectors)
+#         return ssp_vectors  # 返回 [S, ssp_dim]，而不是累加向量
+
+#     # 处理所有批次
+#     global_env_ssp = jax.vmap(process_single_batch)(inputs)  # [B, S, ssp_dim]
+#     jax.debug.print("global_env_ssp:{y}",y=global_env_ssp)
+
+#     return global_env_ssp
+# 
+
+# 
 def ssp_encoder(inputs) -> jnp.ndarray:
     B, S, H, W, _ = inputs.shape  # 包含序列长度 S
     
     def process_single_batch(batch_inputs):
         # 初始化累加的 SSP 向量为全 0
-        init_carry = jnp.zeros((ssp_grid.shape[1],))  # [ssp_dim]
+        init_carry = jnp.zeros((ssp_grid.shape[2],))  # [ssp_dim]
         
         # 定义处理单个时间步的函数
         def process_single_time_step(carry, single_time_step_inputs):
@@ -462,31 +558,40 @@ def ssp_encoder(inputs) -> jnp.ndarray:
             color_labels = single_time_step_inputs[..., 1].astype(jnp.int32)  # [H, W]
 
             # 创建掩码来标识有效位置
-            valid_mask = (tile_labels != 200) & (color_labels != 200)  # [H, W]
+            valid_mask = (tile_labels != 0) & (color_labels != 0) & (tile_labels != 1) & (tile_labels != 2)  # [H, W]
 
-            # 获取所有有效位置的 class_indices（9x9 大小，但无效位置为 -1）
-            class_indices = jnp.where(
-                valid_mask,
-                tile_color_to_class_index_array[tile_labels, color_labels],
-                -1  # 用 -1 标识无效位置
-            )  # [H, W]
-
-            # 根据 class_indices 从 vocab_vectors 中选择对应的标签向量
-            label_ssps = vocab_vectors[class_indices]  # [H, W, ssp_dim]
-            
-            # 从 ssp_grid 中获取位置向量
-            loc_ssps = ssp_grid.reshape(H, W, -1)  # [H, W, ssp_dim]
-
-            # 对标签向量和位置向量进行绑定操作，并忽略无效位置
-            binding_vectors = jnp.where(
-                valid_mask[..., None],  # 扩展维度以匹配向量大小
-                ssp_space.bind(label_ssps, loc_ssps),
-                0  # 对于无效位置，绑定向量为 0
+            # 获取 class_indices 和相应的标签向量
+            class_indices = tile_color_to_class_index_array[tile_labels, color_labels]
+            label_ssps = jnp.where(
+                valid_mask[..., None], 
+                vocab_vectors[class_indices],  # 有效位置的向量
+                jnp.zeros((H, W, ssp_grid.shape[2]))  # 无效位置为零向量
             )  # [H, W, ssp_dim]
+
+            # 获取位置向量
+            loc_ssps = jnp.where(
+                valid_mask[..., None], 
+                ssp_grid,  # 有效位置的坐标向量
+                jnp.zeros((H, W, ssp_grid.shape[2]))  # 无效位置为零向量
+            )  # [H, W, ssp_dim]
+
+            # 使用 vmap 将 bind 函数应用到每个有效位置
+            # binding_vectors = jnp.zeros((H, W, ssp_grid.shape[2]))  # 初始化绑定向量矩阵
+            
+            # 遍历每个位置的标签和坐标，并在每个有效位置上执行绑定操作
+            def bind_single_position(i, j):
+                return jax.lax.cond(
+                    valid_mask[i, j],
+                    lambda: ssp_space.bind(label_ssps[i, j], loc_ssps[i, j]).squeeze(),
+                    lambda: jnp.zeros(ssp_grid.shape[2])
+                )
+
+            # 应用 vmap 逐元素绑定
+            binding_vectors = jax.vmap(lambda i: jax.vmap(lambda j: bind_single_position(i, j))(jnp.arange(W)))(jnp.arange(H))
 
             # 累加所有有效位置的绑定向量
             carry = carry + binding_vectors.sum(axis=(0, 1))  # [ssp_dim]
-            
+
             return carry, carry  # 返回 carry 作为结果，用于保存每个时间步的 SSP 向量
 
         # 使用 scan 来处理该 batch 中的所有时间步
@@ -495,13 +600,15 @@ def ssp_encoder(inputs) -> jnp.ndarray:
             init_carry, 
             batch_inputs
         )
-
+     
         return ssp_vectors  # 返回 [S, ssp_dim]，而不是累加向量
 
     # 处理所有批次
     global_env_ssp = jax.vmap(process_single_batch)(inputs)  # [B, S, ssp_dim]
-    
+   
+
     return global_env_ssp
+
 
 
 def return_ssp_encoder():

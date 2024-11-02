@@ -201,9 +201,9 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "ssp_plr"
+    name: str = "ssp_new_1_billion"
     env_id: str = "XLand-MiniGrid-R1-9x9"
-    benchmark_id: str = "medium-1m"
+    benchmark_id: str = "small-1m"
     img_obs: bool = False 
     # agent
     obs_emb_dim: int = 16
@@ -213,12 +213,12 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int =4
-    num_steps_per_env: int = 4
-    num_steps_per_update: int = 4
+    num_envs: int =2048
+    num_steps_per_env: int = 4096
+    num_steps_per_update: int = 32
     update_epochs: int = 1
-    num_minibatches: int = 1
-    total_timesteps: int = 16
+    num_minibatches: int = 16
+    total_timesteps: int = 1_000_000_000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -229,7 +229,7 @@ class TrainConfig:
     eval_num_envs: int = 512
     eval_num_episodes: int = 10
     eval_seed: int = 42
-    train_seed: int = 42
+    train_seed: int = 3
     checkpoint_path: Optional[str] = None
 ########
     replay_prob: float = 0.5

@@ -587,6 +587,7 @@ class SSPSpace:
     def bind(self, a, b):
         a = jnp.atleast_2d(a)
         b = jnp.atleast_2d(b)
+        x = jnp.fft.ifft(jnp.fft.fft(a, axis=1) * jnp.fft.fft(b, axis=1), axis=1).real
         return jnp.fft.ifft(jnp.fft.fft(a, axis=1) * jnp.fft.fft(b, axis=1), axis=1).real
 
     def invert(self, a):
