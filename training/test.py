@@ -82,7 +82,7 @@ data1 = [[[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]
                   [[2, 6], [2, 6], [2, 6], [2, 6], [2, 6], [2, 6], [2, 6], [2, 6], [2, 6]]]
 # 转换为 JAX 数组
 
-x  = jnp.array([[data1]])
+x  = jnp.array([[data1,data1,data1,data1,data1,data1,data1,data1,data1,data2,data1,data1]])
 
 
 # breakpoint()

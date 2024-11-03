@@ -31,6 +31,7 @@ tile = [
     [2, 2, 2, 2, 2, 2, 2, 2, 2]
 ]
 
+
 color = [
     [0, 0, 0, 0, 0, 0, 0, 0, 0],
     [6, 7, 6, 7, 7, 7, 7, 7, 6],
@@ -58,6 +59,9 @@ for i in range(13):
 p = ssp_space.bind(y,z)
 print(p)
 mask_jnp = jnp.array(mask)
+x = tile_jnp*mask_jnp
+
+breakpoint()
 class_indices = tile_color_to_class_index_array[tile_jnp,color_jnp]
 label_ssps = jnp.where(
                 mask_jnp, 
