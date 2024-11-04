@@ -627,7 +627,7 @@ import jax.numpy as jnp
 from jax.profiler import TraceAnnotation
 
 def ssp_encoder(inputs) -> jnp.ndarray:
-    jax.profiler.start_trace("/tmp/tensorboard")
+    # jax.profiler.start_trace("/tmp/tensorboard")
     B, S, H, W, _ = inputs.shape  # Includes sequence length S
     
     def process_single_batch(batch_inputs):
@@ -636,82 +636,82 @@ def ssp_encoder(inputs) -> jnp.ndarray:
 
         # Define function to process a single time step
         def process_single_time_step(carry, single_time_step_inputs):
-            with TraceAnnotation("tile_and_color_labels"):
-                # Retrieve tile and color labels
-                tile_labels = single_time_step_inputs[..., 0].astype(jnp.int32)  # [H, W]
-                color_labels = single_time_step_inputs[..., 1].astype(jnp.int32)  # [H, W]
+        # with TraceAnnotation("tile_and_color_labels"):
+            # Retrieve tile and color labels
+            tile_labels = single_time_step_inputs[..., 0].astype(jnp.int32)  # [H, W]
+            color_labels = single_time_step_inputs[..., 1].astype(jnp.int32)  # [H, W]
 
-            with TraceAnnotation("valid_mask"):
-                # Create a mask to identify valid positions
-                valid_mask = (tile_labels != 0) & (color_labels != 0) & (tile_labels != 1) & (tile_labels != 2)  # [H, W]
+        # with TraceAnnotation("valid_mask"):
+            # Create a mask to identify valid positions
+            valid_mask = (tile_labels != 0) & (color_labels != 0) & (tile_labels != 1) & (tile_labels != 2)  # [H, W]
 
-            with TraceAnnotation("class_indices_and_label_ssps"):
-                # Get class_indices and corresponding label vectors
-                class_indices = tile_color_to_class_index_array[tile_labels, color_labels]
-            #     label_ssps = jnp.where(
-            #         valid_mask[..., None], 
-            #         vocab_vectors[class_indices],  # Vectors for valid positions
-            #         jnp.zeros((H, W, ssp_grid.shape[1]))  # Zero vector for invalid positions
-            #     )  # [H, W, ssp_dim]
+        # with TraceAnnotation("class_indices_and_label_ssps"):
+            # Get class_indices and corresponding label vectors
+            class_indices = tile_color_to_class_index_array[tile_labels, color_labels]
+        #     label_ssps = jnp.where(
+        #         valid_mask[..., None], 
+        #         vocab_vectors[class_indices],  # Vectors for valid positions
+        #         jnp.zeros((H, W, ssp_grid.shape[1]))  # Zero vector for invalid positions
+        #     )  # [H, W, ssp_dim]
 
-            # with TraceAnnotation("loc_ssps"):
-            #     # Get location vectors
-            #     loc_ssps = jnp.where(
-            #         valid_mask[..., None], 
-            #         ssp_grid,  # Coordinate vectors for valid positions
-            #         jnp.zeros((H, W, ssp_grid.shape[1]))  # Zero vector for invalid positions
-            #     )  # [H, W, ssp_dim]
+        # with TraceAnnotation("loc_ssps"):
+        #     # Get location vectors
+        #     loc_ssps = jnp.where(
+        #         valid_mask[..., None], 
+        #         ssp_grid,  # Coordinate vectors for valid positions
+        #         jnp.zeros((H, W, ssp_grid.shape[1]))  # Zero vector for invalid positions
+        #     )  # [H, W, ssp_dim]
 
-            with TraceAnnotation("position_indices"):
-                # Create position indices for valid positions
-                position_indices = jnp.arange(H * W).reshape(H, W) 
+        # with TraceAnnotation("position_indices"):
+            # Create position indices for valid positions
+            position_indices = jnp.arange(H * W).reshape(H, W) 
 
-            with TraceAnnotation("binding_operation"):
-                # Iterate through each position's label and coordinate, performing binding operation for valid positions
-                # def bind_single_position(i, j):
-                #     return jax.lax.cond(
-                #         valid_mask[i, j],
-                #         lambda: ssp_space.bind(label_ssps[i, j], loc_ssps[i, j]).squeeze(),
-                #         lambda: jnp.zeros(ssp_grid.shape[2])
-                #     )
+        # with TraceAnnotation("binding_operation"):
+            # Iterate through each position's label and coordinate, performing binding operation for valid positions
+            # def bind_single_position(i, j):
+            #     return jax.lax.cond(
+            #         valid_mask[i, j],
+            #         lambda: ssp_space.bind(label_ssps[i, j], loc_ssps[i, j]).squeeze(),
+            #         lambda: jnp.zeros(ssp_grid.shape[2])
+            #     )
 
-                # Apply vmap to bind each element
-                # binding_vectors = jax.vmap(lambda i: jax.vmap(lambda j: bind_single_position(i, j))(jnp.arange(W)))(jnp.arange(H))
-                # 可以直接在整个 [H, W] 的有效位置上进行绑定操作
-                # binding_vectors = jax.vmap(lambda label, loc, mask: 
-                #                         jnp.where(mask, ssp_space.bind(label, loc).squeeze(), 0),
-                #                         in_axes=(0, 0, 0))(label_ssps, loc_ssps, valid_mask[..., None])
-                binding_vectors = jnp.where(
-                    valid_mask[..., None],
-                    pre_bind_check_table[class_indices, position_indices],
-                    jnp.zeros((H, W, ssp_grid.shape[1]))
-                )
-                
+            # Apply vmap to bind each element
+            # binding_vectors = jax.vmap(lambda i: jax.vmap(lambda j: bind_single_position(i, j))(jnp.arange(W)))(jnp.arange(H))
+            # 可以直接在整个 [H, W] 的有效位置上进行绑定操作
+            # binding_vectors = jax.vmap(lambda label, loc, mask: 
+            #                         jnp.where(mask, ssp_space.bind(label, loc).squeeze(), 0),
+            #                         in_axes=(0, 0, 0))(label_ssps, loc_ssps, valid_mask[..., None])
+            binding_vectors = jnp.where(
+                valid_mask[..., None],
+                pre_bind_check_table[class_indices, position_indices],
+                jnp.zeros((H, W, ssp_grid.shape[1]))
+            )
+            
 
 
 
-            with TraceAnnotation("accumulate_binding_vectors"):
-                # Accumulate binding vectors from all valid positions
-                carry = carry + binding_vectors.sum(axis=(0, 1))  # [ssp_dim]
+        # with TraceAnnotation("accumulate_binding_vectors"):
+            # Accumulate binding vectors from all valid positions
+            carry = carry + binding_vectors.sum(axis=(0, 1))  # [ssp_dim]
 
             return carry, carry  # Return carry as the result to store SSP vector for each time step
 
         # Use scan to process all time steps in the batch
-        with TraceAnnotation("scan_time_steps"):
+        # with TraceAnnotation("scan_time_steps"):
             # flat_inputs = batch_inputs.reshape((S * H * W, -1))
-            final_carry, ssp_vectors = jax.lax.scan(
-                process_single_time_step, 
-                init_carry, 
-                batch_inputs
-            )
-            ssp_vectors = ssp_vectors.reshape((S, ssp_dim))     
+        final_carry, ssp_vectors = jax.lax.scan(
+            process_single_time_step, 
+            init_carry, 
+            batch_inputs
+        )
+        ssp_vectors = ssp_vectors.reshape((S, ssp_dim))     
         return ssp_vectors  # Return [S, ssp_dim] instead of the accumulated vector
 
     # Process all batches
-    with TraceAnnotation("process_batches"):
-        global_env_ssp = jax.vmap(process_single_batch)(inputs)  # [B, S, ssp_dim]
+    # with TraceAnnotation("process_batches"):
+    global_env_ssp = jax.vmap(process_single_batch)(inputs)  # [B, S, ssp_dim]
     
-    jax.profiler.stop_trace()
+    # jax.profiler.stop_trace()
     return global_env_ssp
 
 

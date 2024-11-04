@@ -21,6 +21,7 @@ from flax import core,struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState 
+import nn
 from nn import ActorCriticRNN
 from utils import Transition, calculate_gae, ppo_update_networks, rollout
 from xminigrid.benchmarks import Benchmark
@@ -201,7 +202,7 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "ssp_new_1_billion"
+    name: str = "ssp_new_100million"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "small-1m"
     img_obs: bool = False 
@@ -213,12 +214,12 @@ class TrainConfig:
     head_hidden_dim: int = 256
     # training
     enable_bf16: bool = False
-    num_envs: int = 1024
-    num_steps_per_env: int = 1024
+    num_envs: int = 2048
+    num_steps_per_env: int = 4096
     num_steps_per_update: int = 32
     update_epochs: int = 1
     num_minibatches: int = 16
-    total_timesteps: int = 2000000
+    total_timesteps: int = 100000000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
