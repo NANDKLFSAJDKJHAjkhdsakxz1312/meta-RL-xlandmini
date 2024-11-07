@@ -166,3 +166,8 @@ def rollout(
 
     final_carry = jax.lax.while_loop(_cond_fn, _body_fn, init_val=init_carry)
     return final_carry[1]
+
+def create_mask(obs):
+    # Check if each position is `[0, 0]` (invalid) or not
+    mask = jnp.any(obs != jnp.array([0, 0]), axis=-1)
+    return mask

@@ -1,0 +1,20 @@
+method: grid
+metric:
+  goal: maximize
+  name: eval/returns_mean
+parameters:
+  train_seed:
+    values: 
+      - 1
+      - 2
+      - 3
+  benchmark_id:
+    values:
+      - "trivial-1m"
+      - "small-1m"
+      - "medium-1m"
+      - "high-1m"
+
+
+program: training/train_meta_task.py
+project: xminigrid

@@ -2,6 +2,7 @@
 # https://github.com/lupuandr/explainable-policies/blob/50acbd777dc7c6d6b8b7255cd1249e81715bcb54/purejaxrl/ppo_rnn.py#L4
 # https://github.com/lcswillems/rl-starter-files/blob/master/model.py
 import os
+from jax.profiler import TraceAnnotation
 import shutil
 import time
 from dataclasses import asdict, dataclass
@@ -36,6 +37,7 @@ import jax.profiler
 from utils_ssp import HexagonalSSPSpace
 from src.xminigrid.types import TimeStep, State, AgentState, EnvCarry, StepType
 from jax import config
+from jax import jit
 # jax.config.update("jax_disable_jit", True)
 class UpdateState(IntEnum):
     DR = 0
@@ -44,6 +46,22 @@ class UpdateState(IntEnum):
 jax.config.update("jax_threefry_partitionable", True)
 ########
 Prioritization = Literal["rank", "topk"]
+
+i_indices = jnp.arange(9)
+j_indices = jnp.arange(9)
+i_grid, j_grid = jnp.meshgrid(i_indices, j_indices, indexing='ij')
+
+# 展平 i_grid 和 j_grid，准备并行化处理
+i_grid_flat = i_grid.flatten()
+j_grid_flat = j_grid.flatten()
+up_x = i_grid_flat-8
+up_y = j_grid_flat-4
+right_x = j_grid_flat-4
+right_y = -(i_grid_flat-8)
+down_x = -(i_grid_flat-8)
+down_y = -(j_grid_flat-4)
+left_x = -(j_grid_flat-4)
+left_y = i_grid_flat-8
 
 class TrainState(TrainState):
     sampler: core.FrozenDict[str, chex.ArrayTree] = struct.field(pytree_node=True)
@@ -202,7 +220,7 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "ssp_new_100million"
+    name: str = "ssp_1B"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "small-1m"
     img_obs: bool = False 
@@ -219,7 +237,7 @@ class TrainConfig:
     num_steps_per_update: int = 32
     update_epochs: int = 1
     num_minibatches: int = 16
-    total_timesteps: int = 100000000
+    total_timesteps: int = 1_000_000_000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -421,86 +439,205 @@ def make_train(
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
                         # jax.profiler.start_trace("/tmp/jax_trace")
+                        
                         # start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         
+                        agent_positions = prev_timestep.state.agent.position  # 形状：[batch_size, 2]
+                        agent_directions = prev_timestep.state.agent.direction.astype(int)  # 形状：[batch_size]
+                        @jit
+                        def _is_in_bound(x,y):
+                            return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
+                        @jit   
+                        def process_batch(batch,dir,pos):
+                            
 
-                        
-                        
-                        all_batches_label_obs = jnp.zeros((config.num_envs, 9,9,2),dtype=jnp.uint8)
+                            def case_0():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = up_x + pos[0]
+                                y = up_y + pos[1]
+                                mask = _is_in_bound(x, y)
 
-                        # 对于批次中的每个样本，使用 jax.lax.fori_loop
-                        def process_batch(batch_index, all_batches_label_obs):
-                            batch = prev_timestep.observation["img"][batch_index]
-                            obs_shape = (9, 9, 2)
-                            local_obs = -jnp.ones(obs_shape)
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
 
-                            def process_pixel(idx, local_obs):
-                                i = idx // batch.shape[1]
-                                j = idx % batch.shape[1]
-                                label = batch[i, j, :]  # 获取 label
+                                    def set_update_value(obs):
+                                        update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                        return obs.at[xi, yi, :].set(update_value)
 
-                                def is_within_bounds(x, y):
-                                    return (x >= 0) & (x < 9) & (y >= 0) & (y < 9)
-
-                                def case_0(local_obs):
-                                    x = i - 8 + prev_timestep.state.agent.position[batch_index][0]
-                                    y = j - 4 + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
+                                    # 使用 jax.lax.cond 进行条件更新
+                                    obs = jax.lax.cond(
+                                        mask[i],           # 条件为 True 时更新
+                                        set_update_value,   # 满足条件时的更新函数
+                                        lambda obs: obs,    # 不满足条件时保持不变
+                                        obs                 # 传递的数组
                                     )
+                                    return obs
 
-                                def case_1(local_obs):
-                                    x = j - 4 + prev_timestep.state.agent.position[batch_index][0]
-                                    y = -(i - 8) + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
-                                    )
-
-                                def case_2(local_obs):
-                                    x = -(i - 8) + prev_timestep.state.agent.position[batch_index][0]
-                                    y = -(j - 4) + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
-                                    )
-
-                                def case_3(local_obs):
-                                    x = -(j - 4) + prev_timestep.state.agent.position[batch_index][0]
-                                    y = i - 8 + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
-                                    )
-
-                                branches = [case_0, case_1, case_2, case_3]
-
-                                dir_index = prev_timestep.state.agent.direction[batch_index].astype(int)
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
                                 
-                                # 根据 action_index 选择分支
-                                local_obs = jax.lax.switch(dir_index, branches, local_obs)
-
                                 return local_obs
 
-                            num_pixels = batch.shape[0] * batch.shape[1]
-                            local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+                            def case_1():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = right_x + pos[0]
+                                y = right_y + pos[1]
+                                mask = _is_in_bound(x, y)
 
-                            all_batches_label_obs = all_batches_label_obs.at[batch_index].set(local_obs)
-                            return all_batches_label_obs
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
 
-                        num_batches = prev_timestep.observation["img"].shape[0]
+                                    def set_update_value(obs):
+                                        update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                        return obs.at[xi, yi, :].set(update_value)
 
-                        all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
+                                    # 使用 jax.lax.cond 进行条件更新
+                                    obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                    return obs
 
-                        # jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                                
+                                return local_obs
+
+                            def case_2():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = down_x + pos[0]
+                                y = down_y + pos[1]
+                                mask = _is_in_bound(x, y)
+
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
+
+                                    def set_update_value(obs):
+                                        update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                        return obs.at[xi, yi, :].set(update_value)
+
+                                    obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                    return obs
+
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                                
+                                return local_obs
+
+                            def case_3():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = left_x + pos[0]
+                                y = left_y + pos[1]
+                                mask = _is_in_bound(x, y)
+
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
+
+                                    def set_update_value(obs):
+                                        update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                        return obs.at[xi, yi, :].set(update_value)
+
+                                    obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                    return obs
+
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                                
+                                return local_obs
+                            local_obs_final = jax.lax.switch(
+                                dir,
+                                [case_0, case_1, case_2, case_3]
+                            )
+                            return local_obs_final
+                        # 将整个批次并行化处理
+                        all_batches_label_obs = jax.vmap(process_batch)(
+                            prev_timestep.observation["img"], 
+                            agent_directions,
+                            agent_positions
+                        )
+                        
+                        
 
                         prev_timestep.observation['img'] = all_batches_label_obs
+                        
+                        # 对于批次中的每个样本，使用 jax.lax.fori_loop
+                        # def process_batch(batch_index, all_batches_label_obs):
+                        #     with TraceAnnotation("process_batch_start"):
+                        #         batch = prev_timestep.observation["img"][batch_index]
+                        #         # jax.debug.print('original_single_batch:{x}',x=batch)
+                        #         obs_shape = (9, 9, 2)
+                        #         local_obs = -jnp.ones(obs_shape)
+
+                        #         def process_pixel(idx, local_obs):
+                        #             with TraceAnnotation("process_pixel_start"):
+                        #                 i = idx // batch.shape[1]
+                        #                 j = idx % batch.shape[1]
+                        #                 label = batch[i, j, :]  # 获取 label
+
+                        #                 def is_within_bounds(x, y):
+                        #                     return (x >= 0) & (x < 9) & (y >= 0) & (y < 9)
+
+                        #                 def case_0(local_obs):
+                        #                     with TraceAnnotation("case_0"):
+                        #                         x = i - 8 + prev_timestep.state.agent.position[batch_index][0]
+                        #                         y = j - 4 + prev_timestep.state.agent.position[batch_index][1]
+                        #                         return jax.lax.cond(
+                        #                         is_within_bounds(x, y),
+                        #                         lambda obs: obs.at[x, y, :].set(label),
+                        #                         lambda obs: obs, local_obs
+                        #                     )
+
+                        #                 def case_1(local_obs):
+                        #                     with TraceAnnotation("case_1"):
+                        #                         x = j - 4 + prev_timestep.state.agent.position[batch_index][0]
+                        #                         y = -(i - 8) + prev_timestep.state.agent.position[batch_index][1]
+                        #                         return jax.lax.cond(
+                        #                         is_within_bounds(x, y),
+                        #                         lambda obs: obs.at[x, y, :].set(label),
+                        #                         lambda obs: obs, local_obs
+                        #                     )
+
+                        #                 def case_2(local_obs):
+                        #                     with TraceAnnotation("case_2"):
+                        #                         x = -(i - 8) + prev_timestep.state.agent.position[batch_index][0]
+                        #                         y = -(j - 4) + prev_timestep.state.agent.position[batch_index][1]
+                        #                         return jax.lax.cond(
+                        #                         is_within_bounds(x, y),
+                        #                         lambda obs: obs.at[x, y, :].set(label),
+                        #                         lambda obs: obs, local_obs
+                        #                     )
+
+                        #                 def case_3(local_obs):
+                        #                     with TraceAnnotation("case_3"):
+                        #                         x = -(j - 4) + prev_timestep.state.agent.position[batch_index][0]
+                        #                         y = i - 8 + prev_timestep.state.agent.position[batch_index][1]
+                        #                         return jax.lax.cond(
+                        #                         is_within_bounds(x, y),
+                        #                         lambda obs: obs.at[x, y, :].set(label),
+                        #                         lambda obs: obs, local_obs
+                        #                     )
+
+                        #                 branches = [case_0, case_1, case_2, case_3]
+
+                        #                 dir_index = prev_timestep.state.agent.direction[batch_index].astype(int)
+                                        
+                        #                 # 根据 action_index 选择分支
+                        #                 local_obs = jax.lax.switch(dir_index, branches, local_obs)
+
+                        #                 return local_obs
+                        #         with TraceAnnotation("process_pixels"):
+                        #             num_pixels = batch.shape[0] * batch.shape[1]
+                        #             local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+                        #         with TraceAnnotation("update_all_batches_label_obs"):
+                        #             all_batches_label_obs = all_batches_label_obs.at[batch_index].set(local_obs)
+                        #         return all_batches_label_obs
+
+                        # num_batches = prev_timestep.observation["img"].shape[0]
+                        # with TraceAnnotation("process_batches"):
+                        #     all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
+                        # jax.profiler.stop_trace()  # 停止性能分析
+
+                        # # jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
+
+                        # prev_timestep.observation['img'] = all_batches_label_obs
                         # jax.debug.print('after:{x}', x = prev_timestep.observation['img'])
                         rng, _rng = jax.random.split(rng)
                         dist, value, hstate = train_state.apply_fn(
@@ -551,7 +688,6 @@ def make_train(
                         runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
                         # end_time = time.time()  # 结束计时
                         # print(f"_env_step took {end_time - start_time:.4f} seconds")
-                        # jax.profiler.stop_trace()  # 停止性能分析
                         return runner_state, transition
 
                     initial_hstate = runner_state[-1]
@@ -570,78 +706,120 @@ def make_train(
 
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
-                    all_batches_label_obs_for_update = jnp.zeros((config.num_envs, 9,9,2),dtype=jnp.uint8)
-                    def process_batch(batch_index, all_batches_label_obs_for_update):
-                        batch = timestep.observation["img"][batch_index]
-                        obs_shape = (9, 9, 2)
-                        local_obs = -jnp.ones(obs_shape)
+                    def _is_in_bound(x,y):
+                        return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
+                    @jit   
+                    def process_batch(batch,dir,pos):
+                        
 
-                        def process_pixel(idx, local_obs):
-                            i = idx // batch.shape[1]
-                            j = idx % batch.shape[1]
-                            label = batch[i, j, :]  # 获取 label
+                        def case_0():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = up_x + pos[0]
+                            y = up_y + pos[1]
+                            mask = _is_in_bound(x, y)
 
-                            def is_within_bounds(x, y):
-                                return (x >= 0) & (x < 9) & (y >= 0) & (y < 9)
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
 
-                            def case_0(local_obs):
-                                x = i - 8 + timestep.state.agent.position[batch_index][0]
-                                y = j - 4 + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
+                                def set_update_value(obs):
+                                    update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                    return obs.at[xi, yi, :].set(update_value)
+
+                                # 使用 jax.lax.cond 进行条件更新
+                                obs = jax.lax.cond(
+                                    mask[i],           # 条件为 True 时更新
+                                    set_update_value,   # 满足条件时的更新函数
+                                    lambda obs: obs,    # 不满足条件时保持不变
+                                    obs                 # 传递的数组
                                 )
+                                return obs
 
-                            def case_1(local_obs):
-                                x = j - 4 + timestep.state.agent.position[batch_index][0]
-                                y = -(i - 8) + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
-                                )
-
-                            def case_2(local_obs):
-                                x = -(i - 8) + timestep.state.agent.position[batch_index][0]
-                                y = -(j - 4) + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
-                                )
-
-                            def case_3(local_obs):
-                                x = -(j - 4) + timestep.state.agent.position[batch_index][0]
-                                y = i - 8 + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
-                                )
-
-                            branches = [case_0, case_1, case_2, case_3]
-
-                            dir_index = timestep.state.agent.direction[batch_index].astype(int)
+                            # 遍历 x 和 y 坐标，并逐个更新 local_obs
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
                             
-                            # 根据 action_index 选择分支
-                            local_obs = jax.lax.switch(dir_index, branches, local_obs)
-
                             return local_obs
 
-                        num_pixels = batch.shape[0] * batch.shape[1]
-                        local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+                        def case_1():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = right_x + pos[0]
+                            y = right_y + pos[1]
+                            mask = _is_in_bound(x, y)
 
-                        all_batches_label_obs_for_update = all_batches_label_obs_for_update.at[batch_index].set(local_obs)
-                        return all_batches_label_obs_for_update
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
 
-                    num_batches = timestep.observation["img"].shape[0]
+                                def set_update_value(obs):
+                                    update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                    return obs.at[xi, yi, :].set(update_value)
 
-                    all_batches_label_obs_for_update = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs_for_update)
+                                # 使用 jax.lax.cond 进行条件更新
+                                obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                return obs
 
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                            
+                            return local_obs
+
+                        def case_2():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = down_x + pos[0]
+                            y = down_y + pos[1]
+                            mask = _is_in_bound(x, y)
+
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
+
+                                def set_update_value(obs):
+                                    update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                    return obs.at[xi, yi, :].set(update_value)
+
+                                obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                return obs
+
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                            
+                            return local_obs
+
+                        def case_3():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = left_x + pos[0]
+                            y = left_y + pos[1]
+                            mask = _is_in_bound(x, y)
+
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
+
+                                def set_update_value(obs):
+                                    update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                    return obs.at[xi, yi, :].set(update_value)
+
+                                obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                return obs
+
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                            
+                            return local_obs
+                        local_obs_final = jax.lax.switch(
+                            dir,
+                            [case_0, case_1, case_2, case_3]
+                        )
+                        return local_obs_final
+                    # 将整个批次并行化处理
+                    all_batches_label_obs_for_update = jax.vmap(process_batch)(
+                        timestep.observation["img"], 
+                        timestep.state.agent.direction.astype(int) ,
+                        timestep.state.agent.position
+                    )
+                    
                     
 
                     timestep.observation['img'] = all_batches_label_obs_for_update
+                    
+                    
                     
                     # calculate value of the last step for bootstrapping
                     _, last_val, _ = train_state.apply_fn(
@@ -760,83 +938,200 @@ def make_train(
                         # jax.profiler.start_trace("/tmp/jax_trace")
                         # start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
+                        jax.debug.print("before:{x}",x=prev_timestep.observation["img"].squeeze())
+                        
                         # jax.debug.print("rule:{x}",x=prev_timestep.state.rule_encoding)
                         # jax.debug.print("goal:{x}",x=prev_timestep.state.goal_encoding)
                         # jax.debug.print("obs:{x}",x=prev_timestep.observation["img"])
-                        all_batches_label_obs = jnp.zeros((config.num_envs, 9,9,2),dtype=jnp.uint8)
+                        agent_positions = prev_timestep.state.agent.position  # 形状：[batch_size, 2]
+                        agent_directions = prev_timestep.state.agent.direction.astype(int)  # 形状：[batch_size]
+                        
+                        
+                        def _is_in_bound(x,y):
+                            return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
+                        @jit
+                        def process_batch(batch,dir,pos):
+                            
+                            def case_0():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = up_x + pos[0]
+                                y = up_y + pos[1]
+                                mask = _is_in_bound(x, y)
 
-                        # 对于批次中的每个样本，使用 jax.lax.fori_loop
-                        def process_batch(batch_index, all_batches_label_obs):
-                            batch = prev_timestep.observation["img"][batch_index]
-                            obs_shape = (9, 9, 2)
-                            local_obs = -jnp.ones(obs_shape)
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
 
-                            def process_pixel(idx, local_obs):
-                                i = idx // batch.shape[1]
-                                j = idx % batch.shape[1]
-                                label = batch[i, j, :]  # 获取 label
+                                    def set_update_value(obs):
+                                        update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                        return obs.at[xi, yi, :].set(update_value)
 
-                                def is_within_bounds(x, y):
-                                    return (x >= 0) & (x < 9) & (y >= 0) & (y < 9)
-
-                                def case_0(local_obs):
-                                    x = i - 8 + prev_timestep.state.agent.position[batch_index][0]
-                                    y = j - 4 + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
+                                    # 使用 jax.lax.cond 进行条件更新
+                                    obs = jax.lax.cond(
+                                        mask[i],           # 条件为 True 时更新
+                                        set_update_value,   # 满足条件时的更新函数
+                                        lambda obs: obs,    # 不满足条件时保持不变
+                                        obs                 # 传递的数组
                                     )
+                                    return obs
 
-                                def case_1(local_obs):
-                                    x = j - 4 + prev_timestep.state.agent.position[batch_index][0]
-                                    y = -(i - 8) + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
-                                    )
-
-                                def case_2(local_obs):
-                                    x = -(i - 8) + prev_timestep.state.agent.position[batch_index][0]
-                                    y = -(j - 4) + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
-                                    )
-
-                                def case_3(local_obs):
-                                    x = -(j - 4) + prev_timestep.state.agent.position[batch_index][0]
-                                    y = i - 8 + prev_timestep.state.agent.position[batch_index][1]
-                                    return jax.lax.cond(
-                                        is_within_bounds(x, y),
-                                        lambda obs: obs.at[x, y, :].set(label),
-                                        lambda obs: obs, local_obs
-                                    )
-
-                                branches = [case_0, case_1, case_2, case_3]
-
-                                dir_index = prev_timestep.state.agent.direction[batch_index].astype(int)
+                                # 遍历 x 和 y 坐标，并逐个更新 local_obs
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
                                 
-                                # 根据 action_index 选择分支
-                                local_obs = jax.lax.switch(dir_index, branches, local_obs)
-
                                 return local_obs
 
-                            num_pixels = batch.shape[0] * batch.shape[1]
-                            local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+                            def case_1():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = right_x + pos[0]
+                                y = right_y + pos[1]
+                                mask = _is_in_bound(x, y)
 
-                            all_batches_label_obs = all_batches_label_obs.at[batch_index].set(local_obs)
-                            return all_batches_label_obs
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
 
-                        num_batches = prev_timestep.observation["img"].shape[0]
+                                    def set_update_value(obs):
+                                        update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                        return obs.at[xi, yi, :].set(update_value)
 
-                        all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
+                                    # 使用 jax.lax.cond 进行条件更新
+                                    obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                    return obs
 
-                        # jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                                
+                                return local_obs
+
+                            def case_2():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = down_x + pos[0]
+                                y = down_y + pos[1]
+                                mask = _is_in_bound(x, y)
+
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
+
+                                    def set_update_value(obs):
+                                        update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                        return obs.at[xi, yi, :].set(update_value)
+
+                                    obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                    return obs
+
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                                
+                                return local_obs
+
+                            def case_3():
+                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                x = left_x + pos[0]
+                                y = left_y + pos[1]
+                                mask = _is_in_bound(x, y)
+
+                                # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                                def update_local_obs(i, obs):
+                                    xi, yi = x[i], y[i]
+
+                                    def set_update_value(obs):
+                                        update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                        return obs.at[xi, yi, :].set(update_value)
+
+                                    obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                    return obs
+
+                                local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                                
+                                return local_obs
+                            local_obs_final = jax.lax.switch(
+                                dir,
+                                [case_0, case_1, case_2, case_3]
+                            )
+                            return local_obs_final
+                            
+                        # 将整个批次并行化处理
+                        all_batches_label_obs = jax.vmap(process_batch)(
+                            prev_timestep.observation["img"], 
+                            agent_directions,
+                            agent_positions
+                        )
+
+                        
 
                         prev_timestep.observation['img'] = all_batches_label_obs
+                        jax.debug.print("after:{x}",x=prev_timestep.observation["img"].squeeze())
+                        # # 对于批次中的每个样本，使用 jax.lax.fori_loop
+                        # def process_batch(batch_index, all_batches_label_obs):
+                        #     batch = prev_timestep.observation["img"][batch_index]
+                        #     obs_shape = (9, 9, 2)
+                        #     local_obs = -jnp.ones(obs_shape)
+
+                        #     def process_pixel(idx, local_obs):
+                        #         i = idx // batch.shape[1]
+                        #         j = idx % batch.shape[1]
+                        #         label = batch[i, j, :]  # 获取 label
+
+                        #         def is_within_bounds(x, y):
+                        #             return (x >= 0) & (x < 9) & (y >= 0) & (y < 9)
+
+                        #         def case_0(local_obs):
+                        #             x = i - 8 + prev_timestep.state.agent.position[batch_index][0]
+                        #             y = j - 4 + prev_timestep.state.agent.position[batch_index][1]
+                        #             return jax.lax.cond(
+                        #                 is_within_bounds(x, y),
+                        #                 lambda obs: obs.at[x, y, :].set(label),
+                        #                 lambda obs: obs, local_obs
+                        #             )
+
+                        #         def case_1(local_obs):
+                        #             x = j - 4 + prev_timestep.state.agent.position[batch_index][0]
+                        #             y = -(i - 8) + prev_timestep.state.agent.position[batch_index][1]
+                        #             return jax.lax.cond(
+                        #                 is_within_bounds(x, y),
+                        #                 lambda obs: obs.at[x, y, :].set(label),
+                        #                 lambda obs: obs, local_obs
+                        #             )
+
+                        #         def case_2(local_obs):
+                        #             x = -(i - 8) + prev_timestep.state.agent.position[batch_index][0]
+                        #             y = -(j - 4) + prev_timestep.state.agent.position[batch_index][1]
+                        #             return jax.lax.cond(
+                        #                 is_within_bounds(x, y),
+                        #                 lambda obs: obs.at[x, y, :].set(label),
+                        #                 lambda obs: obs, local_obs
+                        #             )
+
+                        #         def case_3(local_obs):
+                        #             x = -(j - 4) + prev_timestep.state.agent.position[batch_index][0]
+                        #             y = i - 8 + prev_timestep.state.agent.position[batch_index][1]
+                        #             return jax.lax.cond(
+                        #                 is_within_bounds(x, y),
+                        #                 lambda obs: obs.at[x, y, :].set(label),
+                        #                 lambda obs: obs, local_obs
+                        #             )
+
+                        #         branches = [case_0, case_1, case_2, case_3]
+
+                        #         dir_index = prev_timestep.state.agent.direction[batch_index].astype(int)
+                                
+                        #         # 根据 action_index 选择分支
+                        #         local_obs = jax.lax.switch(dir_index, branches, local_obs)
+
+                        #         return local_obs
+
+                        #     num_pixels = batch.shape[0] * batch.shape[1]
+                        #     local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+
+                        #     all_batches_label_obs = all_batches_label_obs.at[batch_index].set(local_obs)
+                        #     return all_batches_label_obs
+
+                        # num_batches = prev_timestep.observation["img"].shape[0]
+
+                        # all_batches_label_obs = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs)
+
+                        # # jax.debug.print('before:{x}', x = prev_timestep.observation['img'])
+
+                        
                         # jax.debug.print('after:{x}', x = prev_timestep.observation['img'])
                        
                         # SELECT ACTION
@@ -895,75 +1190,115 @@ def make_train(
 
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
-                    all_batches_label_obs_for_update = jnp.zeros((config.num_envs, 9,9,2),dtype=jnp.uint8)
-                    def process_batch(batch_index, all_batches_label_obs_for_update):
-                        batch = timestep.observation["img"][batch_index]
-                        obs_shape = (9, 9, 2)
-                        local_obs = -jnp.ones(obs_shape)
+                    def _is_in_bound(x,y):
+                        return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
+                    @jit   
+                    def process_batch(batch,dir,pos):
+                        
 
-                        def process_pixel(idx, local_obs):
-                            i = idx // batch.shape[1]
-                            j = idx % batch.shape[1]
-                            label = batch[i, j, :]  # 获取 label
+                        def case_0():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = up_x + pos[0]
+                            y = up_y + pos[1]
+                            mask = _is_in_bound(x, y)
 
-                            def is_within_bounds(x, y):
-                                return (x >= 0) & (x < 9) & (y >= 0) & (y < 9)
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
 
-                            def case_0(local_obs):
-                                x = i - 8 + timestep.state.agent.position[batch_index][0]
-                                y = j - 4 + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
+                                def set_update_value(obs):
+                                    update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                    return obs.at[xi, yi, :].set(update_value)
+
+                                # 使用 jax.lax.cond 进行条件更新
+                                obs = jax.lax.cond(
+                                    mask[i],           # 条件为 True 时更新
+                                    set_update_value,   # 满足条件时的更新函数
+                                    lambda obs: obs,    # 不满足条件时保持不变
+                                    obs                 # 传递的数组
                                 )
+                                return obs
 
-                            def case_1(local_obs):
-                                x = j - 4 + timestep.state.agent.position[batch_index][0]
-                                y = -(i - 8) + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
-                                )
-
-                            def case_2(local_obs):
-                                x = -(i - 8) + timestep.state.agent.position[batch_index][0]
-                                y = -(j - 4) + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
-                                )
-
-                            def case_3(local_obs):
-                                x = -(j - 4) + timestep.state.agent.position[batch_index][0]
-                                y = i - 8 + timestep.state.agent.position[batch_index][1]
-                                return jax.lax.cond(
-                                    is_within_bounds(x, y),
-                                    lambda obs: obs.at[x, y, :].set(label),
-                                    lambda obs: obs, local_obs
-                                )
-
-                            branches = [case_0, case_1, case_2, case_3]
-
-                            dir_index = timestep.state.agent.direction[batch_index].astype(int)
+                            # 遍历 x 和 y 坐标，并逐个更新 local_obs
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
                             
-                            # 根据 action_index 选择分支
-                            local_obs = jax.lax.switch(dir_index, branches, local_obs)
-
                             return local_obs
 
-                        num_pixels = batch.shape[0] * batch.shape[1]
-                        local_obs = jax.lax.fori_loop(0, num_pixels, process_pixel, local_obs)
+                        def case_1():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = right_x + pos[0]
+                            y = right_y + pos[1]
+                            mask = _is_in_bound(x, y)
 
-                        all_batches_label_obs_for_update = all_batches_label_obs_for_update.at[batch_index].set(local_obs)
-                        return all_batches_label_obs_for_update
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
 
-                    num_batches = timestep.observation["img"].shape[0]
+                                def set_update_value(obs):
+                                    update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                    return obs.at[xi, yi, :].set(update_value)
 
-                    all_batches_label_obs_for_update = jax.lax.fori_loop(0, num_batches, process_batch, all_batches_label_obs_for_update)
+                                # 使用 jax.lax.cond 进行条件更新
+                                obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                return obs
 
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                            
+                            return local_obs
+
+                        def case_2():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = down_x + pos[0]
+                            y = down_y + pos[1]
+                            mask = _is_in_bound(x, y)
+
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
+
+                                def set_update_value(obs):
+                                    update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                    return obs.at[xi, yi, :].set(update_value)
+
+                                obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                return obs
+
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                            
+                            return local_obs
+
+                        def case_3():
+                            local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                            x = left_x + pos[0]
+                            y = left_y + pos[1]
+                            mask = _is_in_bound(x, y)
+
+                            # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+                            def update_local_obs(i, obs):
+                                xi, yi = x[i], y[i]
+
+                                def set_update_value(obs):
+                                    update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                    return obs.at[xi, yi, :].set(update_value)
+
+                                obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
+                                return obs
+
+                            local_obs = jax.lax.fori_loop(0, len(x), update_local_obs, local_obs)
+                            
+                            return local_obs
+                        local_obs_final = jax.lax.switch(
+                            dir,
+                            [case_0, case_1, case_2, case_3]
+                        )
+                        return local_obs_final
+                    # 将整个批次并行化处理
+                    all_batches_label_obs_for_update = jax.vmap(process_batch)(
+                        timestep.observation["img"], 
+                        timestep.state.agent.direction.astype(int) ,
+                        timestep.state.agent.position
+                    )
+                    
                     
 
                     timestep.observation['img'] = all_batches_label_obs_for_update
