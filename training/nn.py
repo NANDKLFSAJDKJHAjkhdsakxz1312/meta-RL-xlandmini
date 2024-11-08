@@ -225,7 +225,6 @@ class ActorCriticRNN(nn.Module):
         obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
         dir_emb = direction_encoder(inputs["obs_dir"])
         act_emb = action_encoder(inputs["prev_action"])
-
         # [batch_size, seq_len, hidden_dim + 2 * act_emb_dim + 1]
         out = jnp.concatenate([obs_emb, dir_emb, act_emb, inputs["prev_reward"][..., None]], axis=-1)
 
