@@ -1,3 +1,4 @@
+# test whether local to global transformation is correct or not
 import jax
 import jax.numpy as jnp
 import jax.tree_util as jtu
@@ -21,17 +22,13 @@ from xminigrid.rendering.rgb_render import render
 # rules and goals
 from xminigrid.core.goals import check_goal, AgentNearGoal
 from xminigrid.core.rules import check_rule, AgentNearRule
-def show_img(img, dpi=32):
-    plt.figure(dpi=dpi)
-    plt.axis('off')
-    plt.imshow(img)
-    plt.show()  # 在 Notebook 中显示图像
+
 
 import xminigrid
 i_indices = jnp.arange(9)
 j_indices = jnp.arange(9)
 i_grid, j_grid = jnp.meshgrid(i_indices, j_indices, indexing='ij')
-# 展平 i_grid 和 j_grid，准备并行化处理
+
 i_grid_flat = i_grid.flatten()
 j_grid_flat = j_grid.flatten()
 up_x = i_grid_flat-8
@@ -61,7 +58,7 @@ import jax.numpy as jnp
 import jax.tree_util as jtu
 from xminigrid.wrappers import GymAutoResetWrapper
 import imageio
-# 创建 rollout 函数
+# create rollout function
 def build_rollout(env, env_params, num_steps):
     def rollout(rng):
         def _step_fn(carry, _):
@@ -81,19 +78,19 @@ def build_rollout(env, env_params, num_steps):
 
     return rollout
 
-# 创建环境并包裹自动重置
+# craete environment
 env, env_params = xminigrid.make("XLand-MiniGrid-R1-9x9",view_size=9)
 env_params = env_params.replace(ruleset=ruleset)
 env = GymAutoResetWrapper(env)
 
-# 设置步数并进行 JIT 编译
-num_steps = 10  # 设定要执行的步数
+# set up number of steps for testing
+num_steps = 10 
 rollout_fn = jax.jit(build_rollout(env, env_params, num_steps=num_steps))
 
-# 执行 rollout 并记录结果
+# run rollout 
 transitions = rollout_fn(jax.random.PRNGKey(0))
 
-# 打印结果的形状信息
+
 print("Transitions shapes: \n", jtu.tree_map(jnp.shape, transitions))
 images = []
 steps = []
@@ -101,15 +98,15 @@ for i in trange(10):
     timestep = jtu.tree_map(lambda x: x[i], transitions)
     steps.append(timestep)
     image = env.render(env_params, timestep)
-    images.append(image)  # 将图像添加到列表中（如果需要存储序列）
+    images.append(image)  
 
-    # 保存当前时间步的图像
+
     image_path = os.path.join("/scratch/jiang/ssp_xland/meta-RL-xlandmini/training/", f"timestep_{i}.png")
     plt.figure(dpi=64)
     plt.axis('off')
     plt.imshow(image)
     plt.savefig(image_path, bbox_inches='tight', pad_inches=0)
-    plt.close()  # 关闭图像以释放内存
+    plt.close()  
 
 
 output_path = "/scratch/jiang/ssp_xland/meta-RL-xlandmini/training/example_rollout.mp4"
@@ -131,7 +128,7 @@ def process_batch(batch,dir,pos):
         y = up_y + pos[1]
         mask = _is_in_bound(x, y)
 
-        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
+       
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
@@ -139,12 +136,12 @@ def process_batch(batch,dir,pos):
                 update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
                 return obs.at[xi, yi, :].set(update_value)
 
-            # 使用 jax.lax.cond 进行条件更新
+            
             obs = jax.lax.cond(
-                mask[i],           # 条件为 True 时更新
-                set_update_value,   # 满足条件时的更新函数
-                lambda obs: obs,    # 不满足条件时保持不变
-                obs                 # 传递的数组
+                mask[i],           
+                set_update_value,  
+                lambda obs: obs,    
+                obs                 
             )
             return obs
 
@@ -158,7 +155,6 @@ def process_batch(batch,dir,pos):
         y = right_y + pos[1]
         mask = _is_in_bound(x, y)
 
-        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
@@ -166,7 +162,6 @@ def process_batch(batch,dir,pos):
                 update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
                 return obs.at[xi, yi, :].set(update_value)
 
-            # 使用 jax.lax.cond 进行条件更新
             obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
             return obs
 
@@ -180,7 +175,6 @@ def process_batch(batch,dir,pos):
         y = down_y + pos[1]
         mask = _is_in_bound(x, y)
 
-        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
@@ -201,7 +195,6 @@ def process_batch(batch,dir,pos):
         y = left_y + pos[1]
         mask = _is_in_bound(x, y)
 
-        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
@@ -220,18 +213,16 @@ def process_batch(batch,dir,pos):
         [case_0, case_1, case_2, case_3]
     )
     return local_obs_final
-                        # 将整个批次并行化处理
-######
+
 def extract_fields(steps):
-    observations = jnp.array([step.observation for step in steps])  # 提取所有 observation
-    directions = jnp.array([step.state.agent.direction.astype(int) for step in steps])  # 提取所有 direction 并转为 int
-    positions = jnp.array([step.state.agent.position for step in steps])  # 提取所有 position
+    observations = jnp.array([step.observation for step in steps])  
+    directions = jnp.array([step.state.agent.direction.astype(int) for step in steps])  
+    positions = jnp.array([step.state.agent.position for step in steps])  
     return observations, directions, positions
 
-# 提取所需的字段
+
 observations, directions, positions = extract_fields(steps)
 
-# 使用 `jax.vmap` 向量化 `process_batch` 函数
 all_batches_label_obs = jax.vmap(process_batch)(
     observations, 
     directions,
@@ -243,15 +234,15 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 创建颜色映射，将特征映射到 RGB 颜色
+# tile-color mapping to RGB
 color_map = {
     (1, 7): [0, 0, 0],       # floor - black
     (2, 6): [128, 128, 128], # wall - gray
     (0, 0): [255, 255, 255], # empty - white
-    (3, 5): [0,0 , 0]    # special object - yellow
+    (3, 5): [0,0 , 0]    # special object - black background
 }
 
-# 定义可视化函数，将 9x9x2 的数组转换为 RGB 图像
+# visilize observation image
 def visualize_observation(observation):
     height, width, _ = observation.shape
     rgb_image = np.zeros((height, width, 3), dtype=np.uint8)
@@ -261,25 +252,24 @@ def visualize_observation(observation):
             rgb_image[i, j] = color_map.get(obj_color_pair, [255, 255, 255])  # 默认为白色
     return rgb_image
 
-# 保存路径
 output_dir = "/scratch/jiang/ssp_xland/meta-RL-xlandmini/training"
 os.makedirs(output_dir, exist_ok=True)
 
-# 迭代每个 step
+
 for step_idx in range(10):
-    # 从环境渲染图像
+    # render image
     timestep = steps[step_idx]
-    full_image = env.render(env_params, timestep)  # 全局环境渲染
+    full_image = env.render(env_params, timestep) 
 
-    # 局部和全局观察
-    local_obs = observations[step_idx]  # 当前 step 的局部观察
-    global_obs = all_batches_label_obs[step_idx]  # 当前 step 的全局观察
+    # local and global arrays for current step
+    local_obs = observations[step_idx]  
+    global_obs = all_batches_label_obs[step_idx] 
 
-    # 转换局部和全局观察为 RGB 图像
+    
     local_image = visualize_observation(local_obs)
     global_image = visualize_observation(global_obs)
 
-    # 创建一个包含三个子图的 figure
+    # create 3 sub-figures for each step 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     axes[0].imshow(full_image)
     axes[0].set_title("Environment Render")
@@ -293,28 +283,27 @@ for step_idx in range(10):
     axes[2].set_title("Global Observation")
     axes[2].axis("off")
 
-    # 添加网格线和圆形标记
+    
     for ax, obs in zip([axes[1], axes[2]], [local_obs, global_obs]):
         height, width = obs.shape[:2]
         
-        # 添加网格线
-        for i in range(10):  # 10 因为需要包括边界线
+      
+        for i in range(10):  
             ax.hlines(i - 0.5, -0.5, width - 0.5, color=(.3, .3, .3, .5), linewidth=1)
             ax.vlines(i - 0.5, -0.5, height - 0.5, color=(.3, .3, .3, .5), linewidth=1)
         
-        # 添加特殊对象的黄色圆形标记
+        
         for i in range(height):
             for j in range(width):
-                if tuple(obs[i, j].tolist()) == (3, 5):  # 检查局部或全局观察的特殊对象
+                if tuple(obs[i, j].tolist()) == (3, 5):  
                     circle = plt.Circle((j, i), 0.5, color='yellow', ec='black', linewidth=1.0)
                     ax.add_patch(circle)
 
-    # 保存 figure
     fig.savefig(os.path.join(output_dir, f"step_{step_idx}_visualization.png"), bbox_inches='tight', pad_inches=0)
-    plt.close(fig)  # 关闭 figure 以释放内存
+    plt.close(fig)  
 
 
-
+## below test ssp whether works correctly
 from nn import ssp_encoder
 import numpy as np
 from flax import struct
@@ -346,11 +335,10 @@ sims = out @ nn.ssp_grid.reshape((-1, nn.ssp_dim)).T
 # decode location = point with maximum similarity to label 
 sims_map = sims.reshape((9,9))
 
-# don't forget to remove shift from decoded location 
 pred_loc = np.array(np.unravel_index(np.argmax(sims_map), sims_map.shape)) 
 print(f'{class_index} predicted location: {tuple(pred_loc)}')
 
-# 绘制相似度地图
+
 plt.imshow(sims_map, extent=[0,9,9,0])
 plt.xticks([0,9])
 plt.yticks([0,9])
@@ -360,7 +348,7 @@ plt.xlabel('X')
 plt.ylabel('Y')
 plt.colorbar(label='Similarity')
 
-# 保存图像而不显示
+
 output_path = "/scratch/jiang/ssp_xland/meta-RL-xlandmini/training/ssp_result.png"
 plt.savefig(output_path, bbox_inches='tight', pad_inches=0)
-plt.close()  # 关闭图像以释放内存
+plt.close()  
