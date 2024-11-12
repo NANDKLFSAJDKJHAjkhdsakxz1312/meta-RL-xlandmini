@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # configs
-SWEEP_ID="jn1473733091/xminigrid/s7kuqj0z" 
-GPUS_TO_USE=( 1 2 5 6 7)  
+SWEEP_ID="jn1473733091/xminigrid/xd1puzxf" 
+GPUS_TO_USE=( 4 5 6 7)  
 AGENTS_PER_GPU=1  
 VENV_PATH="/opt/anaconda3/envs/jax_xland" 
 

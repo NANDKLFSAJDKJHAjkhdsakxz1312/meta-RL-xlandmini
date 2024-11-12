@@ -22,7 +22,6 @@ from flax import core,struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState 
-import nn
 from nn import ActorCriticRNN
 from utils import Transition, calculate_gae, ppo_update_networks, rollout
 from xminigrid.benchmarks import Benchmark
@@ -38,6 +37,12 @@ from utils_ssp import HexagonalSSPSpace
 from src.xminigrid.types import TimeStep, State, AgentState, EnvCarry, StepType
 from jax import config
 from jax import jit
+
+def save_timestep_to_file(timestep):
+    # 保存时间步到文件
+    save_path = "/scratch/jiang/ssp_xland/meta-RL-xlandmini/timestep.npy"
+    np.save(save_path, jax.device_get(timestep))
+    print(f"Timestep saved to {save_path}")
 # jax.config.update("jax_disable_jit", True)
 class UpdateState(IntEnum):
     DR = 0
@@ -78,24 +83,26 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "ssp_1B"
+    name: str = "ssp_max_step_243"
     env_id: str = "XLand-MiniGrid-R1-9x9"
-    benchmark_id: str = "small-1m"
+    benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
     # agent
-    obs_emb_dim: int = 16
+    obs_emb_dim: int = 32
     action_emb_dim: int = 16
-    rnn_hidden_dim: int = 1024
-    rnn_num_layers: int = 1
-    head_hidden_dim: int = 256
+    rnn_hidden_dim: int = 2048
+    rnn_num_layers: int = 2
+    head_hidden_dim: int = 512
+    rule_emb_dim: int = 64
+    goal_emb_dim: int = 16
     # training
     enable_bf16: bool = False
-    num_envs: int = 2
-    num_steps_per_env: int = 4
-    num_steps_per_update: int = 4
+    num_envs: int = 512
+    num_steps_per_env: int = 4096
+    num_steps_per_update: int = 32
     update_epochs: int = 1
-    num_minibatches: int = 1
-    total_timesteps: int = 8
+    num_minibatches: int = 16
+    total_timesteps: int = 1_000_000_00
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -148,8 +155,9 @@ def make_states(config: TrainConfig):
         raise ValueError("Only meta-task environments are supported.")
 
     env, env_params = xminigrid.make(config.env_id)
-    
     env_params = env_params.replace(view_size=9)
+    # env_params = env_params.replace(view_size=9,max_steps=500)
+
     env = GymAutoResetWrapper(env)
     env = DirectionObservationWrapper(env)
 
@@ -168,6 +176,8 @@ def make_states(config: TrainConfig):
 
     network = ActorCriticRNN(
         num_actions=env.num_actions(env_params),
+        rule_emb_dim=config.rule_emb_dim,
+        goal_emb_dim=config.goal_emb_dim,
         obs_emb_dim=config.obs_emb_dim,
         action_emb_dim=config.action_emb_dim,
         rnn_hidden_dim=config.rnn_hidden_dim,
@@ -178,12 +188,19 @@ def make_states(config: TrainConfig):
     )
     # [batch_size, seq_len, ...]
     shapes = env.observation_shape(env_params)
+    grid_shape = (env_params.height,env_params.width)
+    goal_shape = benchmark.goals.shape
+    rule_shape = benchmark.rules.shape
+   
     # hard code the initial obs_img shape, later it can be replaced
     init_obs = {
-        "obs_img": jnp.zeros((config.num_envs_per_device, 1, 9,9,2),dtype=jnp.int32),
-        "obs_dir": jnp.zeros((config.num_envs_per_device, 1, 4),dtype=jnp.int32),
+        "obs_img": jnp.zeros((config.num_envs_per_device, 1, grid_shape[0],grid_shape[1],2),dtype=jnp.int32),
+        "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"]),dtype=jnp.int32),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
+        "rule": jnp.zeros((config.num_envs_per_device, 1,rule_shape[1],rule_shape[2]),dtype=jnp.int32),
+        "goal": jnp.zeros((config.num_envs_per_device, 1,goal_shape[1]),dtype=jnp.int32),
+
     }
     init_hstate = network.initialize_carry(batch_size=config.num_envs_per_device)
         
@@ -247,11 +264,16 @@ def make_train(
         prioritization_params={"temperature": config.temperature, "k": config.topk_k},
         duplicate_check=config.duplicate_check
         )
+        shapes = env.observation_shape(env_params)
+        grid_shape = (env_params.height,env_params.width)
+        goal_shape = benchmark.goals.shape
+        rule_shape = benchmark.rules.shape
 
-        eval_hstate = init_hstate[0][None]       
+        eval_hstate = init_hstate[0][None]
+        # images = []       
         # META TRAIN LOOP
         def _meta_step(meta_state, _):
-            rng, train_state = meta_state
+            rng, train_state= meta_state
             
             # INIT ENV
             rng, _rng1, _rng2 = jax.random.split(rng, num=3)
@@ -259,6 +281,7 @@ def make_train(
             reset_rng = jax.random.split(_rng2, num=config.num_envs_per_device)
         
             def on_replay_levels(rng: chex.PRNGKey, train_state: TrainState):    
+                
                 sampler = train_state.sampler
                 # jax.debug.print('episode1:{}',sampler['episode_count'])
                 # jax.debug.print('levels1:{}',sampler['levels'])
@@ -280,9 +303,11 @@ def make_train(
                 timestep = jax.vmap(env.reset, in_axes=(0, 0))(meta_env_params, reset_rng)
                 prev_action = jnp.zeros(config.num_envs_per_device, dtype=jnp.int32)
                 prev_reward = jnp.zeros(config.num_envs_per_device)
+                
 
                 # INNER TRAIN LOOP
                 def _update_step(runner_state, _):
+                    
                     # COLLECT TRAJECTORIES
                     def _env_step(runner_state, _):
                         # jax.profiler.start_trace("/tmp/jax_trace")
@@ -292,16 +317,16 @@ def make_train(
                         
                         agent_positions = prev_timestep.state.agent.position  # shape：[batch_size, 2]
                         agent_directions = prev_timestep.state.agent.direction.astype(int)  # shape: [batch_size]
-                        jax.debug.print("dir shape:{x}",x = agent_directions)
+                        # jax.debug.print("dir shape:{x}",x = agent_directions)
                         @jit
                         def _is_in_bound(x,y):
-                            return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
+                            return (x >= 0) & (x <= grid_shape[0]-1) & (y >= 0) & (y <= grid_shape[1]-1)
                         @jit   
                         def process_batch(batch,dir,pos):
                             
 
                             def case_0():
-                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                local_obs = jnp.zeros((grid_shape[0],grid_shape[1], 2), dtype=jnp.uint8)
                                 x = up_x + pos[0]
                                 y = up_y + pos[1]
                                 mask = _is_in_bound(x, y)
@@ -328,7 +353,7 @@ def make_train(
                                 return local_obs
 
                             def case_1():
-                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                local_obs = jnp.zeros((grid_shape[0],grid_shape[1], 2), dtype=jnp.uint8)
                                 x = right_x + pos[0]
                                 y = right_y + pos[1]
                                 mask = _is_in_bound(x, y)
@@ -350,7 +375,7 @@ def make_train(
                                 return local_obs
 
                             def case_2():
-                                local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+                                local_obs = jnp.zeros((grid_shape[0],grid_shape[1], 2), dtype=jnp.uint8)
                                 x = down_x + pos[0]
                                 y = down_y + pos[1]
                                 mask = _is_in_bound(x, y)
@@ -414,6 +439,8 @@ def make_train(
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
+                                "rule": prev_timestep.state.rule_encoding[:, None],
+                                "goal": prev_timestep.state.goal_encoding[:, None]
                             },
                             prev_hstate,
                             
@@ -426,6 +453,9 @@ def make_train(
                         # STEP ENV
                         timestep = jax.vmap(env.step, in_axes=0)(meta_env_params, prev_timestep, action)
 
+
+
+                        
                         transition = Transition(
                             # ATTENTION: done is always false, as we optimize for entire meta-rollout
                             done=jnp.zeros_like(timestep.last()),
@@ -435,7 +465,8 @@ def make_train(
                             log_prob=log_prob,
                             obs=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
-                            
+                            rule=prev_timestep.state.rule_encoding,
+                            goal=prev_timestep.state.goal_encoding,
                             prev_action=prev_action,
                             prev_reward=prev_reward,
                         )
@@ -448,7 +479,8 @@ def make_train(
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
-
+                    
+                        
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
                     # hard coding here, later can be changed
@@ -570,6 +602,8 @@ def make_train(
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
+                            "rule": timestep.state.rule_encoding[:, None],
+                            "goal": timestep.state.goal_encoding[:, None]
                         },
                         hstate,
                         
@@ -634,10 +668,10 @@ def make_train(
     ########                
                     # averaging over minibatches then over epochs
                     loss_info = jtu.tree_map(lambda x: x.mean(-1).mean(-1), loss_info)
-                    runner_state = (rng, train_state, timestep, prev_action, prev_reward, hstate)
+                    runner_state = (rng, train_state, timestep, prev_action, prev_reward,hstate)
                     return runner_state, loss_info
                 # on each meta-update we reset rnn hidden to init_hstate
-                runner_state = (rng, train_state, timestep, prev_action, prev_reward, init_hstate)
+                runner_state = (rng, train_state, timestep, prev_action, prev_reward,init_hstate)
 
                 runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config.num_inner_updates)
             # WARN: do not forget to get updated params
@@ -683,10 +717,13 @@ def make_train(
                         
                         # jax.debug.print("rule:{x}",x=prev_timestep.state.rule_encoding)
                         # jax.debug.print("goal:{x}",x=prev_timestep.state.goal_encoding)
+                        # jax.debug.print("action:{x}",x=prev_action)
+                        # jax.debug.print("dir:{x}",x=prev_timestep.observation["direction"])
+
                         # jax.debug.print("obs:{x}",x=prev_timestep.observation["img"])
                         agent_positions = prev_timestep.state.agent.position  # shape:[batch_size, 2]
                         agent_directions = prev_timestep.state.agent.direction.astype(int)  # shape: [batch_size]
-                        jax.debug.print("dir shape:{x}",x = agent_directions)
+                        # jax.debug.print("dir shape:{x}",x = agent_directions)
                         
                         def _is_in_bound(x,y):
                             return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
@@ -809,6 +846,8 @@ def make_train(
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
+                                "rule": prev_timestep.state.rule_encoding[:, None],
+                                "goal": prev_timestep.state.goal_encoding[:, None]
                             },
                             prev_hstate,
                             
@@ -820,7 +859,7 @@ def make_train(
                         
                         # STEP ENV
                         timestep = jax.vmap(env.step, in_axes=0)(meta_env_params, prev_timestep, action)
-                     
+                        # images.append(env.render(env_params, timestep))
                         transition = Transition(
                             # ATTENTION: done is always false, as we optimize for entire meta-rollout
                             done=jnp.zeros_like(timestep.last()),
@@ -830,10 +869,12 @@ def make_train(
                             log_prob=log_prob,
                             obs=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
+                            rule=prev_timestep.state.rule_encoding,
+                            goal=prev_timestep.state.goal_encoding,
                             prev_action=prev_action,
                             prev_reward=prev_reward,
                         )
-                        runner_state = (rng, train_state, timestep, action, timestep.reward, hstate)
+                        runner_state = (rng, train_state, timestep, action, timestep.reward,hstate)
                         # end_time = time.time()  
                         # print(f"_env_step took {end_time - start_time:.4f} seconds")
                         # jax.profiler.stop_trace()  
@@ -959,6 +1000,8 @@ def make_train(
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
+                            "rule": timestep.state.rule_encoding[:, None],
+                            "goal": timestep.state.goal_encoding[:, None]
                         },
                         hstate,
                         
@@ -1030,11 +1073,12 @@ def make_train(
                     runner_state = (rng, train_state, timestep, prev_action, prev_reward, hstate)
                     return runner_state, loss_info
                 # on each meta-update we reset rnn hidden to init_hstate
-                runner_state = (rng, train_state, timestep, prev_action, prev_reward, init_hstate)
+                runner_state = (rng, train_state, timestep, prev_action, prev_reward,init_hstate)
 
                 runner_state, loss_info = jax.lax.scan(_update_step, runner_state, None, config.num_inner_updates)
             # WARN: do not forget to get updated params
                 rng, train_state = runner_state[:2]
+              
                 train_state = train_state.replace(
                     
                     update_state=UpdateState.DR,
@@ -1101,7 +1145,7 @@ def make_train(
         num_dr = meta_state[1].num_dr_updates
         levels_dr = meta_state[1].dr_last_level_batch
 
-        return {"state": meta_state[-1], "loss_info": loss_info,'scores':scores,'levels':levels,'timestamps':timestamps,'size':size,'episode_count':episode_count,'num_dr':num_dr,'num_replay':num_replay,'levels_dr':levels_dr} 
+        return {"state": meta_state[1], "loss_info": loss_info,'scores':scores,'levels':levels,'timestamps':timestamps,'size':size,'episode_count':episode_count,'num_dr':num_dr,'num_replay':num_replay,'levels_dr':levels_dr} 
 
     return train
 
@@ -1153,7 +1197,9 @@ def train(config: TrainConfig):
     num_dr_info = train_info['num_dr']
     num_replay_info = train_info['num_replay']
     levels_dr_info = train_info['levels_dr']
-########    
+
+
+
     # logging.basicConfig(filename='/home/jiangnan/new_xlandmini/xland-minigrid/training/levels_scores.log', level=logging.INFO, 
     #                 format='%(asctime)s - %(message)s')
     # logging.info(f'Levels: {levels_info}')

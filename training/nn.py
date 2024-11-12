@@ -126,6 +126,8 @@ class ActorCriticInput(TypedDict):
 
 class ActorCriticRNN(nn.Module):
     num_actions: int
+    rule_emb_dim: int = 64
+    goal_emb_dim: int = 16
     obs_emb_dim: int = 16
     action_emb_dim: int = 16
     rnn_hidden_dim: int = 64
@@ -191,39 +193,39 @@ class ActorCriticRNN(nn.Module):
                 ]
             )
         else:
-        #     img_encoder = nn.Sequential(
-        #         [
-        #             # For small dims nn.Embed is extremely slow in bf16, so we leave everything in default dtypes
-        #             EmbeddingEncoder(emb_dim=self.obs_emb_dim),
-        #             nn.Conv(
-        #                 16,
-        #                 (2, 2),
-        #                 padding="VALID",
-        #                 kernel_init=orthogonal(math.sqrt(2)),
-        #                 dtype=self.dtype,
-        #                 param_dtype=self.param_dtype,
-        #             ),
-        #             nn.relu,
-        #             nn.Conv(
-        #                 32,
-        #                 (2, 2),
-        #                 padding="VALID",
-        #                 kernel_init=orthogonal(math.sqrt(2)),
-        #                 dtype=self.dtype,
-        #                 param_dtype=self.param_dtype,
-        #             ),
-        #             nn.relu,
-        #             nn.Conv(
-        #                 64,
-        #                 (2, 2),
-        #                 padding="VALID",
-        #                 kernel_init=orthogonal(math.sqrt(2)),
-        #                 dtype=self.dtype,
-        #                 param_dtype=self.param_dtype,
-        #             ),
-        #             nn.relu,
-        #         ]
-        #     )
+            # img_encoder = nn.Sequential(
+            #     [
+            #         # For small dims nn.Embed is extremely slow in bf16, so we leave everything in default dtypes
+            #         EmbeddingEncoder(emb_dim=self.obs_emb_dim),
+            #         nn.Conv(
+            #             16,
+            #             (2, 2),
+            #             padding="VALID",
+            #             kernel_init=orthogonal(math.sqrt(2)),
+            #             dtype=self.dtype,
+            #             param_dtype=self.param_dtype,
+            #         ),
+            #         nn.relu,
+            #         nn.Conv(
+            #             32,
+            #             (2, 2),
+            #             padding="VALID",
+            #             kernel_init=orthogonal(math.sqrt(2)),
+            #             dtype=self.dtype,
+            #             param_dtype=self.param_dtype,
+            #         ),
+            #         nn.relu,
+            #         nn.Conv(
+            #             64,
+            #             (2, 2),
+            #             padding="VALID",
+            #             kernel_init=orthogonal(math.sqrt(2)),
+            #             dtype=self.dtype,
+            #             param_dtype=self.param_dtype,
+            #         ),
+            #         nn.relu,
+            #     ]
+            # )
             
             img_encoder = return_ssp_encoder()
         
@@ -231,6 +233,8 @@ class ActorCriticRNN(nn.Module):
         direction_encoder = nn.Dense(
             self.action_emb_dim, dtype=self.dtype, param_dtype=self.param_dtype
         )
+        rule_encoder = nn.Dense(self.rule_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
+        goal_encoder = nn.Dense(self.goal_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
         rnn_core = BatchedRNNModel(
             self.rnn_hidden_dim,
             self.rnn_num_layers,
@@ -271,9 +275,10 @@ class ActorCriticRNN(nn.Module):
                 ),
             ]
         )
-        
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
-        obs_emb = img_encoder(inputs['obs_img']).reshape(B, S, -1)
+
+        # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)  .reshape(B, S, -1)
+        obs_emb = img_encoder(inputs['obs_img'])
        
         # obs_emb = jnp.repeat(obs_emb[:, jnp.newaxis, :], 1, axis=1) 
         # jax.debug.print("obs_emb: {img}", img=obs_emb)
@@ -281,12 +286,14 @@ class ActorCriticRNN(nn.Module):
         dir_emb = direction_encoder(inputs["obs_dir"])
         
         act_emb = action_encoder(inputs["prev_action"])
-        
+        rule_emb = rule_encoder(inputs["rule"]).reshape(B, S,-1)
+        goal_emb = goal_encoder(inputs["goal"])
+
         
         # breakpoint()
         # [batch_size, seq_len, hidden_dim + 2 * act_emb_dim + 1]
         out = jnp.concatenate(
-            [obs_emb, dir_emb, act_emb, inputs["prev_reward"][..., None]], axis=-1
+            [obs_emb, dir_emb, act_emb, inputs["prev_reward"][..., None],rule_emb,goal_emb], axis=-1
         )
 
 
