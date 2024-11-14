@@ -54,21 +54,7 @@ jax.config.update("jax_threefry_partitionable", True)
 ########
 Prioritization = Literal["rank", "topk"]
 
-i_indices = jnp.arange(9)
-j_indices = jnp.arange(9)
-i_grid, j_grid = jnp.meshgrid(i_indices, j_indices, indexing='ij')
 
-# flattening i_grid and j_grid to prepare for parallel processing.
-i_grid_flat = i_grid.flatten()
-j_grid_flat = j_grid.flatten()
-up_x = i_grid_flat-8
-up_y = j_grid_flat-4
-right_x = j_grid_flat-4
-right_y = -(i_grid_flat-8)
-down_x = -(i_grid_flat-8)
-down_y = -(j_grid_flat-4)
-left_x = -(j_grid_flat-4)
-left_y = i_grid_flat-8
 
 i_indices = jnp.arange(5)
 j_indices = jnp.arange(5)
@@ -344,7 +330,7 @@ def make_train(
                         # jax.debug.print("dir shape:{x}",x = agent_directions)
                         @jit
                         def _is_in_bound(x,y):
-                            return (x >= 0) & (x <= grid_shape[0]-1) & (y >= 0) & (y <= grid_shape[1]-1)
+                            return (x >= 0) & (x <=8) & (y >= 0) & (y <= 8)
                         @jit   
                         def process_batch(batch,dir,pos):
                             

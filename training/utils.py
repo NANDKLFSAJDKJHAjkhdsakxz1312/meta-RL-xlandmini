@@ -40,7 +40,7 @@ def process_batch(batch,dir,pos):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                update_value = batch[xi - pos[0] + 4, yi - pos[1] + 2]
                 return obs.at[xi, yi, :].set(update_value)
 
             # 使用 jax.lax.cond 进行条件更新
@@ -67,7 +67,7 @@ def process_batch(batch,dir,pos):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                update_value = batch[4 + pos[1] - yi, xi + 2 - pos[0]]
                 return obs.at[xi, yi, :].set(update_value)
 
             # 使用 jax.lax.cond 进行条件更新
@@ -89,7 +89,7 @@ def process_batch(batch,dir,pos):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                update_value = batch[4 + pos[0] - xi, 2 + pos[1] - yi]
                 return obs.at[xi, yi, :].set(update_value)
 
             obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -110,7 +110,7 @@ def process_batch(batch,dir,pos):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                update_value = batch[4 + yi - pos[1], 2 - xi + pos[0]]
                 return obs.at[xi, yi, :].set(update_value)
 
             obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
