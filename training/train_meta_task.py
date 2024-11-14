@@ -40,11 +40,7 @@ from jax import config
 from jax import jit
 from jax.tree_util import tree_map
 
-def save_timestep_to_file(timestep):
-    # 保存时间步到文件
-    save_path = "/scratch/jiang/ssp_xland/meta-RL-xlandmini/timestep.npy"
-    np.save(save_path, jax.device_get(timestep))
-    print(f"Timestep saved to {save_path}")
+
 # jax.config.update("jax_disable_jit", True)
 class UpdateState(IntEnum):
     DR = 0
@@ -53,22 +49,6 @@ class UpdateState(IntEnum):
 jax.config.update("jax_threefry_partitionable", True)
 ########
 Prioritization = Literal["rank", "topk"]
-
-i_indices = jnp.arange(9)
-j_indices = jnp.arange(9)
-i_grid, j_grid = jnp.meshgrid(i_indices, j_indices, indexing='ij')
-
-# flattening i_grid and j_grid to prepare for parallel processing.
-i_grid_flat = i_grid.flatten()
-j_grid_flat = j_grid.flatten()
-up_x = i_grid_flat-8
-up_y = j_grid_flat-4
-right_x = j_grid_flat-4
-right_y = -(i_grid_flat-8)
-down_x = -(i_grid_flat-8)
-down_y = -(j_grid_flat-4)
-left_x = -(j_grid_flat-4)
-left_y = i_grid_flat-8
 
 i_indices = jnp.arange(5)
 j_indices = jnp.arange(5)
@@ -218,7 +198,7 @@ def make_states(config: TrainConfig):
     # hard code the initial obs_img shape, later it can be replaced
     init_obs = {
         "obs_img": jnp.zeros((config.num_envs_per_device, 1, grid_shape[0],grid_shape[1],2),dtype=jnp.int32),
-        "obs_img_cnn": jnp.zeros((config.num_envs_per_device, 1, 5,5,2),dtype=jnp.int32),
+        # "obs_img_cnn": jnp.zeros((config.num_envs_per_device, 1, 5,5,2),dtype=jnp.int32),
         "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"]),dtype=jnp.int32),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
@@ -460,7 +440,7 @@ def make_train(
                                 # [batch_size, seq_len=1, ...]
                                 # "obs_img": prev_timestep.observation["img"][:, None],
                                 "obs_img": all_batches_label_obs[:, None],
-                                "obs_img_cnn": prev_timestep.observation['img'][:, None],
+                                # "obs_img_cnn": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
@@ -489,7 +469,7 @@ def make_train(
                             reward=timestep.reward,
                             log_prob=log_prob,
                             obs=all_batches_label_obs,
-                            obs_cnn=prev_timestep.observation["img"],
+                            # obs_cnn=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
                             rule=prev_timestep.state.rule_encoding,
                             goal=prev_timestep.state.goal_encoding,
@@ -625,7 +605,7 @@ def make_train(
                         train_state.params,
                         {
                             "obs_img": all_batches_label_obs_for_update[:, None],
-                            "obs_img_cnn": timestep.observation["img"][:, None],
+                            # "obs_img_cnn": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
@@ -869,7 +849,7 @@ def make_train(
                             {
                                 # [batch_size, seq_len=1, ...]
                                 "obs_img": all_batches_label_obs[:, None],
-                                "obs_img_cnn": prev_timestep.observation['img'][:, None],
+                                # "obs_img_cnn": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
@@ -895,7 +875,7 @@ def make_train(
                             reward=timestep.reward,
                             log_prob=log_prob,
                             obs=all_batches_label_obs,
-                            obs_cnn=prev_timestep.observation["img"],
+                            # obs_cnn=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
                             rule=prev_timestep.state.rule_encoding,
                             goal=prev_timestep.state.goal_encoding,
@@ -1025,7 +1005,7 @@ def make_train(
                         train_state.params,
                         {
                             "obs_img": all_batches_label_obs_for_update[:, None],
-                            "obs_img_cnn": timestep.observation["img"][:, None],
+                            # "obs_img_cnn": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],

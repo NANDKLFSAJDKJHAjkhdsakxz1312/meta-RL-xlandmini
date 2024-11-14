@@ -119,7 +119,7 @@ class EmbeddingEncoder(nn.Module):
 
 class ActorCriticInput(TypedDict):
     obs_img: jax.Array
-    obs_img_cnn: jax.Array
+    # obs_img_cnn: jax.Array
     obs_dir: jax.Array
     prev_action: jax.Array
     prev_reward: jax.Array
@@ -319,10 +319,10 @@ class ActorCriticRNN(nn.Module):
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)  .reshape(B, S, -1)
         obs_emb = nn.relu(after_ssp_encoder(img_encoder(inputs['obs_img'])))
 
-        cnn_emb = cnn_encoder(inputs['obs_img_cnn']).reshape(B, S, -1)
-        obs_emb = jnp.concatenate(
-            [obs_emb,cnn_emb], axis=-1
-        )
+        # cnn_emb = cnn_encoder(inputs['obs_img_cnn']).reshape(B, S, -1)
+        # obs_emb = jnp.concatenate(
+        #     [obs_emb,cnn_emb], axis=-1
+        # )
         # obs_emb = after_ssp_encoder2(obs_emb)
         # # 添加 LSTM
         # obs_emb = obs_emb.reshape(obs_emb.shape[0], 1, -1)  # 添加伪序列维度
