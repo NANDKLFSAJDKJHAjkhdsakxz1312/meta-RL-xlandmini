@@ -324,7 +324,7 @@ def make_train(
                         # jax.debug.print("dir shape:{x}",x = agent_directions)
                         @jit
                         def _is_in_bound(x,y):
-                            return (x >= 0) & (x <= grid_shape[0]-1) & (y >= 0) & (y <= grid_shape[1]-1)
+                            return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
                         @jit   
                         def process_batch(batch,dir,pos):
                             
