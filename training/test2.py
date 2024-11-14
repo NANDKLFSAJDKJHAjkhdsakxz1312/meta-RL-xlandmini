@@ -22,23 +22,24 @@ from xminigrid.rendering.rgb_render import render
 # rules and goals
 from xminigrid.core.goals import check_goal, AgentNearGoal
 from xminigrid.core.rules import check_rule, AgentNearRule
-
+grid_shape = (9,9)
 
 import xminigrid
-i_indices = jnp.arange(9)
-j_indices = jnp.arange(9)
+i_indices = jnp.arange(5)
+j_indices = jnp.arange(5)
 i_grid, j_grid = jnp.meshgrid(i_indices, j_indices, indexing='ij')
 
+# flattening i_grid and j_grid to prepare for parallel processing.
 i_grid_flat = i_grid.flatten()
 j_grid_flat = j_grid.flatten()
-up_x = i_grid_flat-8
-up_y = j_grid_flat-4
-right_x = j_grid_flat-4
-right_y = -(i_grid_flat-8)
-down_x = -(i_grid_flat-8)
-down_y = -(j_grid_flat-4)
-left_x = -(j_grid_flat-4)
-left_y = i_grid_flat-8
+up_x = i_grid_flat-4
+up_y = j_grid_flat-2
+right_x = j_grid_flat-2
+right_y = -(i_grid_flat-4)
+down_x = -(i_grid_flat-4)
+down_y = -(j_grid_flat-2)
+left_x = -(j_grid_flat-2)
+left_y = i_grid_flat-4
 goal = AgentNearGoal(tile=TILES_REGISTRY[Tiles.SQUARE, Colors.PURPLE])
 rule = AgentNearRule(
     tile=TILES_REGISTRY[Tiles.BALL, Colors.YELLOW], 
@@ -79,7 +80,7 @@ def build_rollout(env, env_params, num_steps):
     return rollout
 
 # craete environment
-env, env_params = xminigrid.make("XLand-MiniGrid-R1-9x9",view_size=9)
+env, env_params = xminigrid.make("XLand-MiniGrid-R1-9x9")
 env_params = env_params.replace(ruleset=ruleset)
 env = GymAutoResetWrapper(env)
 
@@ -110,38 +111,38 @@ for i in trange(10):
 
 
 output_path = "/scratch/jiang/ssp_xland/meta-RL-xlandmini/training/example_rollout.mp4"
-imageio.mimsave(output_path, images, fps=1, format="mp4")
+imageio.mimsave(output_path, images, fps=10, format="mp4")
 
 print(f"Video saved to {output_path}")
 
 from jax import jit
 @jit
 def _is_in_bound(x,y):
-    return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
+    return (x >= 0) & (x <= grid_shape[0]-1) & (y >= 0) & (y <= grid_shape[1]-1)
 @jit   
 def process_batch(batch,dir,pos):
-
+    
 
     def case_0():
-        local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+        local_obs = jnp.zeros((grid_shape[0],grid_shape[1], 2), dtype=jnp.uint8)
         x = up_x + pos[0]
         y = up_y + pos[1]
         mask = _is_in_bound(x, y)
 
-       
+        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                update_value = batch[xi - pos[0] + 4, yi - pos[1] + 2]
                 return obs.at[xi, yi, :].set(update_value)
 
-            
+            # 使用 jax.lax.cond 进行条件更新
             obs = jax.lax.cond(
-                mask[i],           
-                set_update_value,  
-                lambda obs: obs,    
-                obs                 
+                mask[i],           # 条件为 True 时更新
+                set_update_value,   # 满足条件时的更新函数
+                lambda obs: obs,    # 不满足条件时保持不变
+                obs                 # 传递的数组
             )
             return obs
 
@@ -150,18 +151,20 @@ def process_batch(batch,dir,pos):
         return local_obs
 
     def case_1():
-        local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+        local_obs = jnp.zeros((grid_shape[0],grid_shape[1], 2), dtype=jnp.uint8)
         x = right_x + pos[0]
         y = right_y + pos[1]
         mask = _is_in_bound(x, y)
 
+        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                update_value = batch[4 + pos[1] - yi, xi + 2 - pos[0]]
                 return obs.at[xi, yi, :].set(update_value)
 
+            # 使用 jax.lax.cond 进行条件更新
             obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
             return obs
 
@@ -170,16 +173,17 @@ def process_batch(batch,dir,pos):
         return local_obs
 
     def case_2():
-        local_obs = jnp.zeros((9, 9, 2), dtype=jnp.uint8)
+        local_obs = jnp.zeros((grid_shape[0],grid_shape[1], 2), dtype=jnp.uint8)
         x = down_x + pos[0]
         y = down_y + pos[1]
         mask = _is_in_bound(x, y)
 
+        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                update_value = batch[4 + pos[0] - xi, 2 + pos[1] - yi]
                 return obs.at[xi, yi, :].set(update_value)
 
             obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -195,11 +199,12 @@ def process_batch(batch,dir,pos):
         y = left_y + pos[1]
         mask = _is_in_bound(x, y)
 
+        # 遍历每个位置，仅在满足条件的 (x, y) 位置上更新
         def update_local_obs(i, obs):
             xi, yi = x[i], y[i]
 
             def set_update_value(obs):
-                update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                update_value = batch[4 + yi - pos[1], 2 - xi + pos[0]]
                 return obs.at[xi, yi, :].set(update_value)
 
             obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -213,6 +218,7 @@ def process_batch(batch,dir,pos):
         [case_0, case_1, case_2, case_3]
     )
     return local_obs_final
+# parallelly transform local observation to global one
 
 def extract_fields(steps):
     observations = jnp.array([step.observation for step in steps])  
@@ -317,7 +323,7 @@ import matplotlib.pyplot as plt
 all_batches_label_obs_expanded = all_batches_label_obs[None, ...]
 obs_emb = ssp_encoder(all_batches_label_obs_expanded)
 
-breakpoint()
+
 obs_emb = obs_emb[0][-1]
 
 class_index = nn.tile_color_to_class_index_array[3,5]
@@ -337,6 +343,15 @@ sims_map = sims.reshape((9,9))
 
 pred_loc = np.array(np.unravel_index(np.argmax(sims_map), sims_map.shape)) 
 print(f'{class_index} predicted location: {tuple(pred_loc)}')
+# 找到最大值及其对应的索引
+max_value = sims.max()
+max_index = np.unravel_index(np.argmax(sims), sims_map.shape)
+print(f"最大值: {max_value}，位置: {max_index}")
+
+# 找到最小值及其对应的索引
+min_value = sims.min()
+min_index = np.unravel_index(np.argmin(sims), sims_map.shape)
+print(f"最小值: {min_value}，位置: {min_index}")
 
 
 plt.imshow(sims_map, extent=[0,9,9,0])

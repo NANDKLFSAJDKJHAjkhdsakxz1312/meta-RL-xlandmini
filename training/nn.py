@@ -119,6 +119,7 @@ class EmbeddingEncoder(nn.Module):
 
 class ActorCriticInput(TypedDict):
     obs_img: jax.Array
+    obs_img_cnn: jax.Array
     obs_dir: jax.Array
     prev_action: jax.Array
     prev_reward: jax.Array
@@ -128,6 +129,9 @@ class ActorCriticRNN(nn.Module):
     num_actions: int
     rule_emb_dim: int = 64
     goal_emb_dim: int = 16
+    after_ssp_dim: int = 512
+    # after_ssp_dim2: int = 256
+    # lstm_hidden_dim: int = 256
     obs_emb_dim: int = 16
     action_emb_dim: int = 16
     rnn_hidden_dim: int = 64
@@ -226,6 +230,39 @@ class ActorCriticRNN(nn.Module):
             #         nn.relu,
             #     ]
             # )
+            cnn_encoder = nn.Sequential(
+                [
+                    # For small dims nn.Embed is extremely slow in bf16, so we leave everything in default dtypes
+                    EmbeddingEncoder(emb_dim=self.obs_emb_dim),
+                    nn.Conv(
+                        16,
+                        (2, 2),
+                        padding="VALID",
+                        kernel_init=orthogonal(math.sqrt(2)),
+                        dtype=self.dtype,
+                        param_dtype=self.param_dtype,
+                    ),
+                    nn.relu,
+                    nn.Conv(
+                        32,
+                        (2, 2),
+                        padding="VALID",
+                        kernel_init=orthogonal(math.sqrt(2)),
+                        dtype=self.dtype,
+                        param_dtype=self.param_dtype,
+                    ),
+                    nn.relu,
+                    nn.Conv(
+                        64,
+                        (2, 2),
+                        padding="VALID",
+                        kernel_init=orthogonal(math.sqrt(2)),
+                        dtype=self.dtype,
+                        param_dtype=self.param_dtype,
+                    ),
+                    nn.relu,
+                ]
+            )
             
             img_encoder = return_ssp_encoder()
         
@@ -235,6 +272,8 @@ class ActorCriticRNN(nn.Module):
         )
         rule_encoder = nn.Dense(self.rule_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
         goal_encoder = nn.Dense(self.goal_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
+        after_ssp_encoder = nn.Dense(self.after_ssp_dim,dtype=self.dtype, param_dtype=self.param_dtype)
+        # after_ssp_encoder2 = nn.Dense(self.after_ssp_dim2,dtype=self.dtype, param_dtype=self.param_dtype)
         rnn_core = BatchedRNNModel(
             self.rnn_hidden_dim,
             self.rnn_num_layers,
@@ -278,16 +317,36 @@ class ActorCriticRNN(nn.Module):
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
 
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)  .reshape(B, S, -1)
-        obs_emb = img_encoder(inputs['obs_img'])
+        obs_emb = nn.relu(after_ssp_encoder(img_encoder(inputs['obs_img'])))
+
+        cnn_emb = cnn_encoder(inputs['obs_img_cnn']).reshape(B, S, -1)
+        obs_emb = jnp.concatenate(
+            [obs_emb,cnn_emb], axis=-1
+        )
+        # obs_emb = after_ssp_encoder2(obs_emb)
+        # # 添加 LSTM
+        # obs_emb = obs_emb.reshape(obs_emb.shape[0], 1, -1)  # 添加伪序列维度
+        # # 在构建 nn.scan 时传递 LSTMCell 的隐藏维度
+        # lstm = nn.scan(
+        #     nn.LSTMCell(features=self.lstm_hidden_dim),  # 指定隐藏维度
+        #     variable_broadcast='params',
+        #     split_rngs={'params': False},
+        # )(name="lstm")
+
+        # lstm_state = nn.LSTMCell.initialize_carry(RNG, (obs_emb.shape[0],), self.lstm_hidden_dim)
+        # obs_emb, _ = lstm(lstm_state, obs_emb)
+        
+
        
         # obs_emb = jnp.repeat(obs_emb[:, jnp.newaxis, :], 1, axis=1) 
         # jax.debug.print("obs_emb: {img}", img=obs_emb)
         # breakpoint()
-        dir_emb = direction_encoder(inputs["obs_dir"])
+        dir_emb = nn.relu(direction_encoder(inputs["obs_dir"]))
         
-        act_emb = action_encoder(inputs["prev_action"])
-        rule_emb = rule_encoder(inputs["rule"]).reshape(B, S,-1)
-        goal_emb = goal_encoder(inputs["goal"])
+        act_emb = nn.relu(action_encoder(inputs["prev_action"]))
+        rule_emb = nn.relu(rule_encoder(inputs["rule"]).reshape(B, S,-1))
+        goal_emb = nn.relu(goal_encoder(inputs["goal"]))
+        
 
         
         # breakpoint()
@@ -321,8 +380,8 @@ import jax.numpy as jnp
 import train_meta_task
 
 
-NUM_TILES = len(Tiles.__annotations__)  # 替换为实际的类别数量
-NUM_COLORS = len(Colors.__annotations__)  # 替换为实际的类别数量
+NUM_TILES = len(Tiles.__annotations__)  
+NUM_COLORS = len(Colors.__annotations__)  
 
 NUM_CLASSES = NUM_TILES * NUM_COLORS
 ssp_dim = 1015

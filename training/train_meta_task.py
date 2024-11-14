@@ -18,6 +18,7 @@ import orbax
 import pyrallis
 import wandb
 import xminigrid
+import flax
 from flax import core,struct
 from flax.jax_utils import replicate, unreplicate
 from flax.training import orbax_utils
@@ -37,6 +38,7 @@ from utils_ssp import HexagonalSSPSpace
 from src.xminigrid.types import TimeStep, State, AgentState, EnvCarry, StepType
 from jax import config
 from jax import jit
+from jax.tree_util import tree_map
 
 def save_timestep_to_file(timestep):
     # 保存时间步到文件
@@ -68,6 +70,22 @@ down_y = -(j_grid_flat-4)
 left_x = -(j_grid_flat-4)
 left_y = i_grid_flat-8
 
+i_indices = jnp.arange(5)
+j_indices = jnp.arange(5)
+i_grid, j_grid = jnp.meshgrid(i_indices, j_indices, indexing='ij')
+
+# flattening i_grid and j_grid to prepare for parallel processing.
+i_grid_flat = i_grid.flatten()
+j_grid_flat = j_grid.flatten()
+up_x = i_grid_flat-4
+up_y = j_grid_flat-2
+right_x = j_grid_flat-2
+right_y = -(i_grid_flat-4)
+down_x = -(i_grid_flat-4)
+down_y = -(j_grid_flat-2)
+left_x = -(j_grid_flat-2)
+left_y = i_grid_flat-4
+
 class TrainState(TrainState):
     sampler: core.FrozenDict[str, chex.ArrayTree] = struct.field(pytree_node=True)
     update_state: UpdateState = struct.field(pytree_node=True)
@@ -83,26 +101,29 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "ssp_max_step_243"
+    name: str = "local_cnn_with_ssp"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
     # agent
-    obs_emb_dim: int = 32
+    obs_emb_dim: int = 16
     action_emb_dim: int = 16
-    rnn_hidden_dim: int = 2048
-    rnn_num_layers: int = 2
-    head_hidden_dim: int = 512
+    rnn_hidden_dim: int = 1024
+    rnn_num_layers: int = 1
+    head_hidden_dim: int = 256
     rule_emb_dim: int = 64
     goal_emb_dim: int = 16
+    after_ssp_dim: int = 512
+    # after_ssp_dim2: int = 256
+    lstm_hidden_dim: int = 512
     # training
     enable_bf16: bool = False
-    num_envs: int = 512
+    num_envs: int = 2048
     num_steps_per_env: int = 4096
     num_steps_per_update: int = 32
     update_epochs: int = 1
     num_minibatches: int = 16
-    total_timesteps: int = 1_000_000_00
+    total_timesteps: int = 1_000_000_000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -155,7 +176,7 @@ def make_states(config: TrainConfig):
         raise ValueError("Only meta-task environments are supported.")
 
     env, env_params = xminigrid.make(config.env_id)
-    env_params = env_params.replace(view_size=9)
+    # env_params = env_params.replace(view_size=9)
     # env_params = env_params.replace(view_size=9,max_steps=500)
 
     env = GymAutoResetWrapper(env)
@@ -178,6 +199,8 @@ def make_states(config: TrainConfig):
         num_actions=env.num_actions(env_params),
         rule_emb_dim=config.rule_emb_dim,
         goal_emb_dim=config.goal_emb_dim,
+        after_ssp_dim=config.after_ssp_dim,
+        # after_ssp_dim2=config.after_ssp_dim2,
         obs_emb_dim=config.obs_emb_dim,
         action_emb_dim=config.action_emb_dim,
         rnn_hidden_dim=config.rnn_hidden_dim,
@@ -195,6 +218,7 @@ def make_states(config: TrainConfig):
     # hard code the initial obs_img shape, later it can be replaced
     init_obs = {
         "obs_img": jnp.zeros((config.num_envs_per_device, 1, grid_shape[0],grid_shape[1],2),dtype=jnp.int32),
+        "obs_img_cnn": jnp.zeros((config.num_envs_per_device, 1, 5,5,2),dtype=jnp.int32),
         "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"]),dtype=jnp.int32),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
@@ -206,7 +230,7 @@ def make_states(config: TrainConfig):
         
     
     network_params = network.init(_rng, init_obs, init_hstate)
-
+    
     tx = optax.chain(
         optax.clip_by_global_norm(config.max_grad_norm),
         optax.inject_hyperparams(optax.adam)(learning_rate=linear_schedule, eps=1e-8),  # eps=1e-5
@@ -225,7 +249,7 @@ def make_states(config: TrainConfig):
         duplicate_check=config.duplicate_check
     )
     sampler = levelsampler.initialize(pholder_level, {"max_return": -jnp.inf})
-    pholder_level_batch = jax.tree_map(lambda x: jnp.array([x]).repeat(config.num_envs, axis=0), pholder_level)
+    pholder_level_batch = tree_map(lambda x: jnp.array([x]).repeat(config.num_envs, axis=0), pholder_level)
     
 ########
 
@@ -336,7 +360,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                        update_value = batch[xi - pos[0] + 4, yi - pos[1] + 2]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     # 使用 jax.lax.cond 进行条件更新
@@ -363,7 +387,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                        update_value = batch[4 + pos[1] - yi, xi + 2 - pos[0]]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     # 使用 jax.lax.cond 进行条件更新
@@ -385,7 +409,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                        update_value = batch[4 + pos[0] - xi, 2 + pos[1] - yi]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -406,7 +430,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                        update_value = batch[4 + yi - pos[1], 2 - xi + pos[0]]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -427,7 +451,7 @@ def make_train(
                             agent_positions
                         )
                         # replace the local observation by global observation for later ssp use
-                        prev_timestep.observation['img'] = all_batches_label_obs
+                        # prev_timestep.observation['img'] = all_batches_label_obs
 
                         rng, _rng = jax.random.split(rng)
                         dist, value, hstate = train_state.apply_fn(
@@ -435,7 +459,8 @@ def make_train(
                             {
                                 # [batch_size, seq_len=1, ...]
                                 # "obs_img": prev_timestep.observation["img"][:, None],
-                                "obs_img": prev_timestep.observation['img'][:, None],
+                                "obs_img": all_batches_label_obs[:, None],
+                                "obs_img_cnn": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
@@ -463,7 +488,8 @@ def make_train(
                             value=value,
                             reward=timestep.reward,
                             log_prob=log_prob,
-                            obs=prev_timestep.observation["img"],
+                            obs=all_batches_label_obs,
+                            obs_cnn=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
                             rule=prev_timestep.state.rule_encoding,
                             goal=prev_timestep.state.goal_encoding,
@@ -501,7 +527,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                    update_value = batch[xi - pos[0] + 4, yi - pos[1] + 2]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                
@@ -529,7 +555,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                    update_value = batch[4 + pos[1] - yi, xi + 2 - pos[0]]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 
@@ -551,7 +577,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                    update_value = batch[4 + pos[0] - xi, 2 + pos[1] - yi]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -572,7 +598,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                    update_value = batch[4 + yi - pos[1], 2 - xi + pos[0]]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -593,12 +619,13 @@ def make_train(
                         timestep.state.agent.position
                     )
                     # also need to transform local to global representation when update the network
-                    timestep.observation['img'] = all_batches_label_obs_for_update
+                    # timestep.observation['img'] = all_batches_label_obs_for_update
                     # calculate value of the last step for bootstrapping
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": timestep.observation["img"][:, None],
+                            "obs_img": all_batches_label_obs_for_update[:, None],
+                            "obs_img_cnn": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
@@ -741,7 +768,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                        update_value = batch[xi - pos[0] + 4, yi - pos[1] + 2]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     
@@ -769,7 +796,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                        update_value = batch[4 + pos[1] - yi, xi + 2 - pos[0]]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     # 使用 jax.lax.cond 进行条件更新
@@ -791,7 +818,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                        update_value = batch[4 + pos[0] - xi, 2 + pos[1] - yi]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -811,7 +838,7 @@ def make_train(
                                     xi, yi = x[i], y[i]
 
                                     def set_update_value(obs):
-                                        update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                        update_value = batch[4 + yi - pos[1], 2 - xi + pos[0]]
                                         return obs.at[xi, yi, :].set(update_value)
 
                                     obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -833,7 +860,7 @@ def make_train(
                             agent_positions
                         )
 
-                        prev_timestep.observation['img'] = all_batches_label_obs
+                        # prev_timestep.observation['img'] = all_batches_label_obs
                         
                         # SELECT ACTION
                         rng, _rng = jax.random.split(rng)
@@ -841,8 +868,8 @@ def make_train(
                             train_state.params,
                             {
                                 # [batch_size, seq_len=1, ...]
-                                "obs_img": prev_timestep.observation['img'][:, None],
-                                
+                                "obs_img": all_batches_label_obs[:, None],
+                                "obs_img_cnn": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
@@ -867,7 +894,8 @@ def make_train(
                             value=value,
                             reward=timestep.reward,
                             log_prob=log_prob,
-                            obs=prev_timestep.observation["img"],
+                            obs=all_batches_label_obs,
+                            obs_cnn=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
                             rule=prev_timestep.state.rule_encoding,
                             goal=prev_timestep.state.goal_encoding,
@@ -903,7 +931,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[xi - pos[0] + 8, yi - pos[1] + 4]
+                                    update_value = batch[xi - pos[0] + 4, yi - pos[1] + 2]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 
@@ -929,7 +957,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[8 + pos[1] - yi, xi + 4 - pos[0]]
+                                    update_value = batch[4 + pos[1] - yi, xi + 2 - pos[0]]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -949,7 +977,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[8 + pos[0] - xi, 4 + pos[1] - yi]
+                                    update_value = batch[4 + pos[0] - xi, 2 + pos[1] - yi]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -969,7 +997,7 @@ def make_train(
                                 xi, yi = x[i], y[i]
 
                                 def set_update_value(obs):
-                                    update_value = batch[8 + yi - pos[1], 4 - xi + pos[0]]
+                                    update_value = batch[4 + yi - pos[1], 2 - xi + pos[0]]
                                     return obs.at[xi, yi, :].set(update_value)
 
                                 obs = jax.lax.cond(mask[i], set_update_value, lambda obs: obs, obs)
@@ -990,13 +1018,14 @@ def make_train(
                     )
                     
                     # also need to transform local to global representation when update the network
-                    timestep.observation['img'] = all_batches_label_obs_for_update
+                    # timestep.observation['img'] = all_batches_label_obs_for_update
                     
                     # calculate value of the last step for bootstrapping
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": timestep.observation["img"][:, None],
+                            "obs_img": all_batches_label_obs_for_update[:, None],
+                            "obs_img_cnn": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
