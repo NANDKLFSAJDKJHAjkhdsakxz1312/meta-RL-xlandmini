@@ -39,7 +39,7 @@ from src.xminigrid.types import TimeStep, State, AgentState, EnvCarry, StepType
 from jax import config
 from jax import jit
 from jax.tree_util import tree_map
-
+from ssp_encoder import ssp_encoder
 
 # jax.config.update("jax_disable_jit", True)
 class UpdateState(IntEnum):
@@ -69,6 +69,7 @@ left_y = i_grid_flat-4
 class TrainState(TrainState):
     sampler: core.FrozenDict[str, chex.ArrayTree] = struct.field(pytree_node=True)
     update_state: UpdateState = struct.field(pytree_node=True)
+    global_ssp: jax.Array
     # === Below is used for logging ===
     num_dr_updates: int
     num_replay_updates: int
@@ -77,11 +78,12 @@ class TrainState(TrainState):
     replay_last_level_batch: chex.ArrayTree = struct.field(pytree_node=True)
     mutation_last_level_batch: chex.ArrayTree = struct.field(pytree_node=True)
 
+
 @dataclass
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "ssp_only"
+    name: str = "ssp_1b"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
@@ -91,19 +93,19 @@ class TrainConfig:
     rnn_hidden_dim: int = 1024
     rnn_num_layers: int = 1
     head_hidden_dim: int = 256
-    rule_emb_dim: int = 64
+    rule_emb_dim: int = 16
     goal_emb_dim: int = 16
     after_ssp_dim: int = 512
-    # after_ssp_dim2: int = 256
-    lstm_hidden_dim: int = 512
+    after_ssp_dim2: int = 256
+    # lstm_hidden_dim: int = 512
     # training
     enable_bf16: bool = False
-    num_envs: int = 4096
-    num_steps_per_env: int = 2048
+    num_envs: int = 8192
+    num_steps_per_env: int = 4096
     num_steps_per_update: int = 32
     update_epochs: int = 1
     num_minibatches: int = 16
-    total_timesteps: int = 1_000_000_00
+    total_timesteps: int = 1000000000
     lr: float = 0.001
     clip_eps: float = 0.2
     gamma: float = 0.99
@@ -180,7 +182,7 @@ def make_states(config: TrainConfig):
         rule_emb_dim=config.rule_emb_dim,
         goal_emb_dim=config.goal_emb_dim,
         after_ssp_dim=config.after_ssp_dim,
-        # after_ssp_dim2=config.after_ssp_dim2,
+        after_ssp_dim2=config.after_ssp_dim2,
         obs_emb_dim=config.obs_emb_dim,
         action_emb_dim=config.action_emb_dim,
         rnn_hidden_dim=config.rnn_hidden_dim,
@@ -197,7 +199,7 @@ def make_states(config: TrainConfig):
    
     # hard code the initial obs_img shape, later it can be replaced
     init_obs = {
-        "obs_img": jnp.zeros((config.num_envs_per_device, 1, grid_shape[0],grid_shape[1],2),dtype=jnp.int32),
+        "obs_img": jnp.zeros((config.num_envs_per_device, 1, 1015),dtype=jnp.int32),
         # "obs_img_cnn": jnp.zeros((config.num_envs_per_device, 1, 5,5,2),dtype=jnp.int32),
         "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"]),dtype=jnp.int32),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
@@ -208,9 +210,10 @@ def make_states(config: TrainConfig):
     }
     init_hstate = network.initialize_carry(batch_size=config.num_envs_per_device)
         
-    
+    jax.debug.print("before init{x}",x=1)
     network_params = network.init(_rng, init_obs, init_hstate)
-    
+    jax.debug.print("after init{x}",x=1)
+
     tx = optax.chain(
         optax.clip_by_global_norm(config.max_grad_norm),
         optax.inject_hyperparams(optax.adam)(learning_rate=linear_schedule, eps=1e-8),  # eps=1e-5
@@ -241,7 +244,8 @@ def make_states(config: TrainConfig):
             num_mutation_updates=0,
             dr_last_level_batch=pholder_level_batch,
             replay_last_level_batch=pholder_level_batch,
-            mutation_last_level_batch=pholder_level_batch)
+            mutation_last_level_batch=pholder_level_batch,
+            global_ssp=jnp.zeros((config.num_envs,1015)) )
 
     return rng, env, env_params, benchmark, init_hstate, train_state
 
@@ -318,7 +322,6 @@ def make_train(
                         
                         # start_time = time.time()
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
-                        
                         agent_positions = prev_timestep.state.agent.position  # shape：[batch_size, 2]
                         agent_directions = prev_timestep.state.agent.direction.astype(int)  # shape: [batch_size]
                         # jax.debug.print("dir shape:{x}",x = agent_directions)
@@ -432,24 +435,28 @@ def make_train(
                         )
                         # replace the local observation by global observation for later ssp use
                         # prev_timestep.observation['img'] = all_batches_label_obs
-
+                        
                         rng, _rng = jax.random.split(rng)
+                        final_ssp,_ = ssp_encoder(all_batches_label_obs[:, None],train_state.global_ssp)
+                        train_state = train_state.replace(global_ssp=final_ssp)
                         dist, value, hstate = train_state.apply_fn(
                             train_state.params,
                             {
                                 # [batch_size, seq_len=1, ...]
                                 # "obs_img": prev_timestep.observation["img"][:, None],
-                                "obs_img": all_batches_label_obs[:, None],
+                                "obs_img": final_ssp[:, None],
                                 # "obs_img_cnn": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
                                 "rule": prev_timestep.state.rule_encoding[:, None],
-                                "goal": prev_timestep.state.goal_encoding[:, None]
+                                "goal": prev_timestep.state.goal_encoding[:, None],
+                               
                             },
                             prev_hstate,
-                            
+                        
                         )
+                      
                         
                         action, log_prob = dist.sample_and_log_prob(seed=_rng)
                         # squeeze seq_len where possible
@@ -481,7 +488,8 @@ def make_train(
                         # end_time = time.time() 
                         # print(f"_env_step took {end_time - start_time:.4f} seconds")
                         return runner_state, transition
-
+                    rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
+                    initial_train_state_global_ssp_at_start_of_one_transitions = train_state.global_ssp
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
@@ -489,6 +497,7 @@ def make_train(
                         
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
+                    
                     # hard coding here, later can be changed
                     def _is_in_bound(x,y):
                         return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
@@ -601,10 +610,12 @@ def make_train(
                     # also need to transform local to global representation when update the network
                     # timestep.observation['img'] = all_batches_label_obs_for_update
                     # calculate value of the last step for bootstrapping
-                    _, last_val, _ = train_state.apply_fn(
+                    final_ssp, _ = ssp_encoder(all_batches_label_obs_for_update[:, None],train_state.global_ssp)
+                    train_state = train_state.replace(global_ssp=final_ssp)
+                    _, last_val, _  = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": all_batches_label_obs_for_update[:, None],
+                            "obs_img": final_ssp[:,None],
                             # "obs_img_cnn": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
@@ -629,7 +640,10 @@ def make_train(
                     # UPDATE NETWORK
                     def _update_epoch(update_state, _):
                         def _update_minbatch(train_state, batch_info):
-                            init_hstate, transitions, advantages, targets = batch_info
+                            minibatch = batch_info["minibatches"]
+                            global_ssp = batch_info["global_ssp"]
+                            train_state = train_state.replace(global_ssp=global_ssp)
+                            init_hstate, transitions, advantages, targets = minibatch
                             new_train_state, update_info = ppo_update_networks(
                                 train_state=train_state,
                                 transitions=transitions,
@@ -640,38 +654,53 @@ def make_train(
                                 vf_coef=config.vf_coef,
                                 ent_coef=config.ent_coef,
                             )
-
+                            new_train_state = new_train_state.replace(global_ssp=jnp.zeros((config.num_envs,1015)))
                             return new_train_state, update_info
                         rng, train_state, init_hstate, transitions, advantages, targets = update_state
-
+                        prev_train_state_global_ssp = train_state.global_ssp
                         # MINIBATCHES PREPARATION
                         rng, _rng = jax.random.split(rng)
                         permutation = jax.random.permutation(_rng, config.num_envs_per_device)
+                        
+
                         # [seq_len, batch_size, ...]
                         batch = (init_hstate, transitions, advantages, targets)
                         # [batch_size, seq_len, ...], as our model assumes
                         batch = jtu.tree_map(lambda x: x.swapaxes(0, 1), batch)
 
                         shuffled_batch = jtu.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
+                        shuffled_global_ssp = jnp.take(train_state.global_ssp, permutation, axis=0)
+                        minibatch_global_ssps = jnp.reshape(
+                            shuffled_global_ssp, (config.num_minibatches, -1, train_state.global_ssp.shape[-1])
+                        )
                         # [num_minibatches, minibatch_size, ...]
                         minibatches = jtu.tree_map(
                             lambda x: jnp.reshape(x, (config.num_minibatches, -1) + x.shape[1:]), shuffled_batch
                         )
-                    
-                        train_state, update_info = jax.lax.scan(_update_minbatch, train_state, minibatches)
-
+                        # 打印检查形状
+                        
+                        # train_state = train_state.replace(global_ssp=minibatch_global_ssps)
+                        minibatches_with_global_ssp = {
+                            "minibatches": minibatches,
+                            "global_ssp": minibatch_global_ssps
+                        }                        
+                        
+                        train_state, update_info = jax.lax.scan(_update_minbatch, train_state, minibatches_with_global_ssp)
+                        train_state = train_state.replace(global_ssp=prev_train_state_global_ssp)
                         update_state = (rng, train_state, init_hstate, transitions, advantages, targets)
                         return update_state, update_info
 
                     # hstate shape: [seq_len=None, batch_size, num_layers, hidden_dim]
+                    train_state = train_state.replace(global_ssp=initial_train_state_global_ssp_at_start_of_one_transitions)
                     update_state = (rng, train_state, initial_hstate[None, :], transitions, advantages, targets)
                 
                     update_state, loss_info= jax.lax.scan(_update_epoch, update_state, None, config.update_epochs)
                 # WARN: do not forget to get updated params
                     rng, train_state = update_state[:2]
-    ########                
+    ########        
                     train_state = train_state.replace(
-                    sampler=sampler,)
+                    sampler=sampler,
+                    global_ssp=final_ssp)
     ########                
                     # averaging over minibatches then over epochs
                     loss_info = jtu.tree_map(lambda x: x.mean(-1).mean(-1), loss_info)
@@ -694,6 +723,8 @@ def make_train(
                     update_state=UpdateState.REPLAY,
                     num_replay_updates=train_state.num_replay_updates + 1,
                     replay_last_level_batch=levels,
+                    
+                    # on each meta-update we reset rnn hidden to init_hstate
                     )
                 # jax.debug.print('episode4:{}',sampler['episode_count'])
                 # jax.debug.print('levels4:{}',sampler['levels'])
@@ -722,6 +753,7 @@ def make_train(
                         rng, train_state, prev_timestep, prev_action, prev_reward, prev_hstate = runner_state
                         # jax.debug.print("before:{x}",x=prev_timestep.observation["img"].squeeze())
                         
+
                         # jax.debug.print("rule:{x}",x=prev_timestep.state.rule_encoding)
                         # jax.debug.print("goal:{x}",x=prev_timestep.state.goal_encoding)
                         # jax.debug.print("action:{x}",x=prev_action)
@@ -844,11 +876,13 @@ def make_train(
                         
                         # SELECT ACTION
                         rng, _rng = jax.random.split(rng)
+                        final_ssp,_ = ssp_encoder(all_batches_label_obs[:, None],train_state.global_ssp)
+                        train_state = train_state.replace(global_ssp=final_ssp)
                         dist, value, hstate = train_state.apply_fn(
                             train_state.params,
                             {
                                 # [batch_size, seq_len=1, ...]
-                                "obs_img": all_batches_label_obs[:, None],
+                                "obs_img": final_ssp[:, None],
                                 # "obs_img_cnn": prev_timestep.observation['img'][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
@@ -857,8 +891,9 @@ def make_train(
                                 "goal": prev_timestep.state.goal_encoding[:, None]
                             },
                             prev_hstate,
-                            
+                        
                         )
+                        
                         action, log_prob = dist.sample_and_log_prob(seed=_rng)
                         # squeeze seq_len where possible
                         action, value, log_prob = action.squeeze(1), value.squeeze(1), log_prob.squeeze(1)
@@ -887,13 +922,15 @@ def make_train(
                         # print(f"_env_step took {end_time - start_time:.4f} seconds")
                         # jax.profiler.stop_trace()  
                         return runner_state, transition
-
+                    rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
+                    initial_train_state_global_ssp_at_start_of_one_transitions = train_state.global_ssp
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
 
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
+                    
                     def _is_in_bound(x,y):
                         return (x >= 0) & (x <= 8) & (y >= 0) & (y <= 8)
                     @jit   
@@ -1001,10 +1038,14 @@ def make_train(
                     # timestep.observation['img'] = all_batches_label_obs_for_update
                     
                     # calculate value of the last step for bootstrapping
+                    final_ssp,_ = ssp_encoder(all_batches_label_obs_for_update[:, None],train_state.global_ssp)
+                    train_state = train_state.replace(global_ssp=final_ssp)
+                    
+
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": all_batches_label_obs_for_update[:, None],
+                            "obs_img": final_ssp[:,None],
                             # "obs_img_cnn": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
@@ -1015,6 +1056,7 @@ def make_train(
                         hstate,
                         
                     )
+                   
                     advantages, targets = calculate_gae(transitions, last_val.squeeze(1), config.gamma, config.gae_lambda)
     ########        
                     
@@ -1030,7 +1072,10 @@ def make_train(
                     # UPDATE NETWORK
                     def _update_epoch(update_state, _):
                         def _update_minbatch(train_state, batch_info):
-                            init_hstate, transitions, advantages, targets = batch_info
+                            minibatch = batch_info["minibatches"]
+                            global_ssp = batch_info["global_ssp"]
+                            train_state = train_state.replace(global_ssp=global_ssp)
+                            init_hstate, transitions, advantages, targets = minibatch
                             new_train_state, update_info = ppo_update_networks(
                                 train_state=train_state,
                                 transitions=transitions,
@@ -1041,38 +1086,54 @@ def make_train(
                                 vf_coef=config.vf_coef,
                                 ent_coef=config.ent_coef,
                             )
-
+                            new_train_state = new_train_state.replace(global_ssp=jnp.zeros((config.num_envs,1015)))
                             return new_train_state, update_info
                         rng, train_state, init_hstate, transitions, advantages, targets = update_state
-
+                        prev_train_state_global_ssp = train_state.global_ssp
                         # MINIBATCHES PREPARATION
                         rng, _rng = jax.random.split(rng)
                         permutation = jax.random.permutation(_rng, config.num_envs_per_device)
+                        
+
                         # [seq_len, batch_size, ...]
                         batch = (init_hstate, transitions, advantages, targets)
                         # [batch_size, seq_len, ...], as our model assumes
                         batch = jtu.tree_map(lambda x: x.swapaxes(0, 1), batch)
 
                         shuffled_batch = jtu.tree_map(lambda x: jnp.take(x, permutation, axis=0), batch)
+                        shuffled_global_ssp = jnp.take(train_state.global_ssp, permutation, axis=0)
+                        minibatch_global_ssps = jnp.reshape(
+                            shuffled_global_ssp, (config.num_minibatches, -1, train_state.global_ssp.shape[-1])
+                        )
                         # [num_minibatches, minibatch_size, ...]
                         minibatches = jtu.tree_map(
                             lambda x: jnp.reshape(x, (config.num_minibatches, -1) + x.shape[1:]), shuffled_batch
                         )
-                    
-                        train_state, update_info = jax.lax.scan(_update_minbatch, train_state, minibatches)
-
+                       
+                        
+                        # train_state = train_state.replace(global_ssp=minibatch_global_ssps)
+                        minibatches_with_global_ssp = {
+                            "minibatches": minibatches,
+                            "global_ssp": minibatch_global_ssps
+                        }                        
+                        
+                        train_state, update_info = jax.lax.scan(_update_minbatch, train_state, minibatches_with_global_ssp)
+                        
+                        train_state = train_state.replace(global_ssp=prev_train_state_global_ssp)
                         update_state = (rng, train_state, init_hstate, transitions, advantages, targets)
                         return update_state, update_info
 
                     # hstate shape: [seq_len=None, batch_size, num_layers, hidden_dim]
+                    train_state = train_state.replace(global_ssp=initial_train_state_global_ssp_at_start_of_one_transitions)
                     update_state = (rng, train_state, initial_hstate[None, :], transitions, advantages, targets)
-                
+
                     update_state, loss_info= jax.lax.scan(_update_epoch, update_state, None, config.update_epochs)
                 # WARN: do not forget to get updated params
                     rng, train_state = update_state[:2]
     ########                
                     train_state = train_state.replace(
-                    sampler=sampler)
+                    sampler=sampler,
+                    global_ssp=initial_train_state_global_ssp_at_start_of_one_transitions)
     ########        
                     # jax.debug.print('sampler_size: {}', train_state.sampler['size'])
                     # jax.debug.print('sampler_levels:{}',train_state.sampler['levels'])
@@ -1112,12 +1173,15 @@ def make_train(
 
             eval_ruleset = jax.vmap(benchmark.sample_ruleset)(eval_ruleset_rng)
             eval_env_params = env_params.replace(ruleset=eval_ruleset)
-
-            eval_stats = jax.vmap(rollout, in_axes=(0, None, 0, None, None, None))(
+            train_state = train_state.replace(global_ssp=jnp.zeros(( 1015,)))
+            independent_train_states = jax.tree_map(
+            lambda x: jnp.stack([x] * config.eval_num_envs_per_device), train_state
+            )
+            eval_stats = jax.vmap(rollout, in_axes=(0, None, 0, 0, None, None))(
                 eval_reset_rng,
                 env,
                 eval_env_params,
-                train_state,
+                independent_train_states,
                 eval_hstate,
                 config.eval_num_episodes,
             )
@@ -1137,6 +1201,7 @@ def make_train(
                     "scores":train_state.sampler["scores"].mean()
                 }
             )
+            train_state = train_state.replace(global_ssp=jnp.zeros((config.num_envs,1015)))
             meta_state = (rng, train_state)
             jax.debug.print('scores:{}',train_state.sampler["scores"])
             jax.debug.print('scores_mean:{}',train_state.sampler["scores"].mean())

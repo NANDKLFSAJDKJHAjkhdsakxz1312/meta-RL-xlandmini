@@ -569,6 +569,10 @@ class SSPSpace:
 
     def normalize(self, ssp):
         return ssp / jnp.maximum(jnp.sqrt(jnp.sum(ssp**2)), 1e-8)
+    
+    def normalize_by_last_dim(self,ssp):
+        norms = jnp.linalg.norm(ssp, axis=-1, keepdims=True)
+        return ssp / jnp.maximum(norms, 1e-8)
 
     def make_unitary(self, ssp):
         fssp = np.fft.fft(ssp)

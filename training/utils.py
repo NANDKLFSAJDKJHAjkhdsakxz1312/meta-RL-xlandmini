@@ -5,8 +5,7 @@ from flax import struct
 from flax.training.train_state import TrainState
 
 from xminigrid.environment import Environment, EnvParams
-
-
+from ssp_encoder import ssp_encoder
 
 # Training stuff
 class Transition(struct.PyTreeNode):
@@ -68,11 +67,14 @@ def ppo_update_networks(
     # breakpoint()
     def _loss_fn(params):
         # RERUN NETWORK
-        dist, value, _ = train_state.apply_fn(
+
+        _,ssp_carry = ssp_encoder(transitions.obs,train_state.global_ssp)
+        # train_state = trainstate.replace(global_ssp=ssp_carry)
+        dist, value, _= train_state.apply_fn(
             params,
             {
                 # [batch_size, seq_len, ...]
-                "obs_img": transitions.obs,
+                "obs_img": ssp_carry,
                 # "obs_img_cnn": transitions.obs_cnn,
                 "obs_dir": transitions.dir,
                 "prev_action": transitions.prev_action,
@@ -83,6 +85,7 @@ def ppo_update_networks(
             init_hstate,
             
         )
+       
         log_prob = dist.log_prob(transitions.action)
 
         # CALCULATE VALUE LOSS
@@ -137,17 +140,21 @@ def rollout(
     init_hstate: jax.Array,
     num_consecutive_episodes: int = 1,
 ) -> RolloutStats:
+    
     def _cond_fn(carry):
-        rng, stats, timestep, prev_action, prev_reward, hstate = carry
+        rng, stats, timestep, prev_action, prev_reward, hstate,global_ssp = carry
         return jnp.less(stats.episodes, num_consecutive_episodes)
 
     def _body_fn(carry):
-        rng, stats, timestep, prev_action, prev_reward, hstate = carry
+        rng, stats, timestep, prev_action, prev_reward, hstate,global_ssp = carry
         rng, _rng = jax.random.split(rng)
-        dist, _, hstate = train_state.apply_fn(
+        
+        final_ssp,_ = ssp_encoder(timestep.observation["img"][None, None, ...],global_ssp[None,...])
+        final_ssp = final_ssp.squeeze()
+        dist, _, hstate  = train_state.apply_fn(
             train_state.params,
             {
-                "obs_img": timestep.observation["img"][None, None, ...],
+                "obs_img": final_ssp[None, None, ...],
                 "obs_dir": timestep.observation["direction"][None, None, ...],
                 "prev_action": prev_action[None, None, ...],
                 "prev_reward": prev_reward[None, None, ...],
@@ -156,6 +163,7 @@ def rollout(
 
             },
             hstate,
+         
         )
         action = dist.sample(seed=_rng).squeeze()
         timestep = env.step(env_params, timestep, action)
@@ -165,15 +173,17 @@ def rollout(
             length=stats.length + 1,
             episodes=stats.episodes + timestep.last(),
         )
-        carry = (rng, stats, timestep, action, timestep.reward, hstate)
+        carry = (rng, stats, timestep, action, timestep.reward, hstate,final_ssp)
         return carry
 
     timestep = env.reset(env_params, rng)
     prev_action = jnp.asarray(0)
     prev_reward = jnp.asarray(0)
-    init_carry = (rng, RolloutStats(), timestep, prev_action, prev_reward, init_hstate)
+    init_global_ssp = train_state.global_ssp  
+    init_carry = (rng, RolloutStats(), timestep, prev_action, prev_reward, init_hstate,init_global_ssp)
 
     final_carry = jax.lax.while_loop(_cond_fn, _body_fn, init_val=init_carry)
+    
     return final_carry[1]
 
 def create_mask(obs):

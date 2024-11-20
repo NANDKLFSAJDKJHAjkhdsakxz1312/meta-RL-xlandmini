@@ -128,7 +128,7 @@ class AgentNearGoal(BaseGoal):
                 | equal(down, self.tile)
                 | equal(left, self.tile)
             )
-
+    
             return check
 
         check = jax.lax.select(jnp.equal(action, 0), _check_fn(), jnp.asarray(False))

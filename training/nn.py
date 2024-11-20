@@ -16,9 +16,11 @@ import jax
 import jax.numpy as jnp
 from jax.profiler import TraceAnnotation
 from xminigrid.core.constants import NUM_COLORS, NUM_TILES
-from utils_ssp import HexagonalSSPSpace
+
 import sys
 import os
+from xminigrid.core.rules import NUM_RULES
+from xminigrid.core.goals import NUM_GOALS
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.xminigrid.types  import TimeStep
@@ -116,6 +118,84 @@ class EmbeddingEncoder(nn.Module):
         )
         return img_emb
 
+class RuleEncoder(nn.Module):
+    emb_dim: int = 16
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, rules):
+        rule_id_emb = nn.Embed(NUM_RULES, self.emb_dim, self.dtype, self.param_dtype)
+        rule_tile_emb = nn.Embed(NUM_TILES, self.emb_dim, self.dtype, self.param_dtype)
+        rule_color_emb = nn.Embed(NUM_COLORS, self.emb_dim, self.dtype, self.param_dtype)
+
+        # [..., channels]
+        rule_emb = jnp.concatenate(
+            [
+                rule_id_emb(rules[..., 0]),
+                rule_tile_emb(rules[..., 1]),
+                rule_color_emb(rules[..., 2]),
+                rule_tile_emb(rules[..., 3]),
+                rule_color_emb(rules[..., 4]),
+                rule_tile_emb(rules[..., 5]),
+                rule_color_emb(rules[..., 6]),
+            ],
+            axis=-1,
+        )
+        B, S = rules.shape[:2]
+        rule_emb = rule_emb.reshape(B, S, -1)
+        return rule_emb
+    
+class GoalEncoder(nn.Module):
+    emb_dim: int = 16
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, rules):
+        goal_id_emb = nn.Embed(NUM_GOALS, self.emb_dim, self.dtype, self.param_dtype)
+        goal_tile_emb = nn.Embed(NUM_TILES, self.emb_dim, self.dtype, self.param_dtype)
+        goal_color_emb = nn.Embed(NUM_COLORS, self.emb_dim, self.dtype, self.param_dtype)
+
+        # [..., channels]
+        goal_emb = jnp.concatenate(
+            [
+                goal_id_emb(rules[..., 0]),
+                goal_tile_emb(rules[..., 1]),
+                goal_color_emb(rules[..., 2]),
+                goal_tile_emb(rules[..., 3]),
+                goal_color_emb(rules[..., 4]),
+            ],
+            axis=-1,
+        )
+        return goal_emb
+
+
+class AfterSSPEncoder(nn.Module):
+    after_ssp_dim: int
+    after_ssp_dim2: int
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, inputs):
+        # 第一个 Dense 层
+        x = nn.Dense(
+            features=self.after_ssp_dim,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype
+        )(inputs)
+        x = nn.relu(x)  # 激活函数
+
+        # 第二个 Dense 层
+        x = nn.Dense(
+            features=self.after_ssp_dim2,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype
+        )(x)
+        x = nn.relu(x)  # 激活函数
+
+        return x
 
 class ActorCriticInput(TypedDict):
     obs_img: jax.Array
@@ -129,8 +209,8 @@ class ActorCriticRNN(nn.Module):
     num_actions: int
     rule_emb_dim: int = 64
     goal_emb_dim: int = 16
-    after_ssp_dim: int = 512
-    # after_ssp_dim2: int = 256
+    after_ssp_dim: int = 256
+    after_ssp_dim2: int = 256
     # lstm_hidden_dim: int = 256
     obs_emb_dim: int = 16
     action_emb_dim: int = 16
@@ -145,10 +225,11 @@ class ActorCriticRNN(nn.Module):
     def __call__(
         self, inputs: ActorCriticInput, hidden: jax.Array
     ) -> tuple[distrax.Categorical, jax.Array, jax.Array]:
+        # B ,S,_= inputs["obs_img"].shape[:]
+        
+
         
         
-        B ,S,_,_,_= inputs["obs_img"].shape[:]
-       
         # encoder from https://github.com/lcswillems/rl-starter-files/blob/master/model.py
         if self.img_obs:
             
@@ -264,16 +345,20 @@ class ActorCriticRNN(nn.Module):
                 ]
             )
             
-            img_encoder = return_ssp_encoder()
+            after_ssp_encoder = AfterSSPEncoder(
+            after_ssp_dim=self.after_ssp_dim,
+            after_ssp_dim2=self.after_ssp_dim2,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype
+            )
+
         
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
         direction_encoder = nn.Dense(
             self.action_emb_dim, dtype=self.dtype, param_dtype=self.param_dtype
         )
-        rule_encoder = nn.Dense(self.rule_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
-        goal_encoder = nn.Dense(self.goal_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
-        after_ssp_encoder = nn.Dense(self.after_ssp_dim,dtype=self.dtype, param_dtype=self.param_dtype)
-        # after_ssp_encoder2 = nn.Dense(self.after_ssp_dim2,dtype=self.dtype, param_dtype=self.param_dtype)
+        
+        
         rnn_core = BatchedRNNModel(
             self.rnn_hidden_dim,
             self.rnn_num_layers,
@@ -317,13 +402,13 @@ class ActorCriticRNN(nn.Module):
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
 
         # obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)  .reshape(B, S, -1)
-        obs_emb = nn.relu(after_ssp_encoder(img_encoder(inputs['obs_img'])))
+       
 
         # cnn_emb = cnn_encoder(inputs['obs_img_cnn']).reshape(B, S, -1)
         # obs_emb = jnp.concatenate(
         #     [obs_emb,cnn_emb], axis=-1
         # )
-        # obs_emb = after_ssp_encoder2(obs_emb)
+        
         # # 添加 LSTM
         # obs_emb = obs_emb.reshape(obs_emb.shape[0], 1, -1)  # 添加伪序列维度
         # # 在构建 nn.scan 时传递 LSTMCell 的隐藏维度
@@ -341,12 +426,17 @@ class ActorCriticRNN(nn.Module):
         # obs_emb = jnp.repeat(obs_emb[:, jnp.newaxis, :], 1, axis=1) 
         # jax.debug.print("obs_emb: {img}", img=obs_emb)
         # breakpoint()
+        # 使用编码器处理输入
+        obs_emb = after_ssp_encoder(inputs["obs_img"])
         dir_emb = nn.relu(direction_encoder(inputs["obs_dir"]))
         
         act_emb = nn.relu(action_encoder(inputs["prev_action"]))
-        rule_emb = nn.relu(rule_encoder(inputs["rule"]).reshape(B, S,-1))
-        goal_emb = nn.relu(goal_encoder(inputs["goal"]))
+        rule_encoder = RuleEncoder(self.rule_emb_dim)
         
+        
+        goal_encoder = GoalEncoder(self.goal_emb_dim)
+        rule_emb = rule_encoder(inputs["rule"])
+        goal_emb = goal_encoder(inputs["goal"])
 
         
         # breakpoint()
@@ -372,134 +462,3 @@ class ActorCriticRNN(nn.Module):
             (batch_size, self.rnn_num_layers, self.rnn_hidden_dim), dtype=self.dtype
         )
 
-global_obs_dic = {}
-from src.xminigrid.core.constants import Tiles,Colors
-
-import jax
-import jax.numpy as jnp
-import train_meta_task
-
-
-NUM_TILES = len(Tiles.__annotations__)  
-NUM_COLORS = len(Colors.__annotations__)  
-
-NUM_CLASSES = NUM_TILES * NUM_COLORS
-ssp_dim = 1015
-length_scale = 5
-env_grid_size = 9
-RNG = jax.random.PRNGKey(train_meta_task.TrainConfig.train_seed)
-# 创建 SSP 空间
-ssp_space = HexagonalSSPSpace(domain_dim=2, ssp_dim=ssp_dim, length_scale=length_scale,
-                                domain_bounds=jnp.array([[0, env_grid_size], [0, env_grid_size]]))
-
-# 生成坐标网格
-x_coords, y_coords = jnp.meshgrid(jnp.arange(0, env_grid_size), jnp.arange(0, env_grid_size), indexing='ij')
-coords = jnp.stack((x_coords.flatten(), y_coords.flatten()), axis=-1)
-ssp_grid = ssp_space.encode(coords)
-
-
-# ssp_grid = ssp_grid.reshape((env_grid_size, env_grid_size, -1))
-# 创建随机向量作为类别向量
-CLASS_LST = [f"TILE_{i}_COLOR_{j}" for i in range(NUM_TILES) for j in range(NUM_COLORS)]
-
-
-
-
-vocab = spa.Vocabulary(dimensions=ssp_dim, pointer_gen=RNG)
-for i, class_name in enumerate(CLASS_LST):
-    vector = vocab.algebra.create_vector(ssp_dim, properties={"positive", "unitary"})
-    vocab.add(f"{class_name}", vector)
-
-vocab_vectors = jnp.array(vocab.vectors)
-num_classes = len(vocab_vectors)  # 类别数量
-num_positions = len(ssp_grid)  # 网格中的位置数量
-ssp_dim = ssp_grid.shape[1]  # SSP 向量的维度
-
-# nn模块中初始化pre_bind_check_table时
-print("Calculating pre_bind_check_table...")
-pre_bind_check_table = jnp.zeros((num_classes, num_positions, ssp_dim))
-for i in range(num_classes):
-    for j in range(num_positions):
-        pre_bind_check_table = pre_bind_check_table.at[i, j].set(
-            jnp.squeeze(ssp_space.bind(vocab_vectors[i], ssp_grid[j]))
-        )
-print("pre_bind_check_table calculated.")
-
-
-
-# rng_keys = jax.random.split(RNG, NUM_CLASSES)
-# label_vectors = jax.vmap(lambda key: jax.random.normal(key, (ssp_dim,)))(rng_keys)  # [NUM_CLASSES, ssp_dim]
-
-# 创建类别映射数组
-tile_color_to_class_index_array = -jnp.ones((NUM_TILES, NUM_COLORS), dtype=jnp.int32)
-index = 0
-for i in range(NUM_TILES):
-    for j in range(NUM_COLORS):
-        tile_color_to_class_index_array = tile_color_to_class_index_array.at[i, j].set(index)
-        index += 1
-
-
-
-
-def ssp_encoder(inputs) -> jnp.ndarray:
-  
-    B, S, H, W, _ = inputs.shape  # Includes sequence length S
-    
-    def process_single_batch(batch_inputs):
-        # Initialize accumulated SSP vector as all zeros
-        init_carry = jnp.zeros((ssp_grid.shape[1],))  # [ssp_dim]
-
-        # Define function to process a single time step
-        def process_single_time_step(carry, single_time_step_inputs):
-        
-            # Retrieve tile and color labels
-            tile_labels = single_time_step_inputs[..., 0].astype(jnp.int32)  # [H, W]
-            color_labels = single_time_step_inputs[..., 1].astype(jnp.int32)  # [H, W]
-
-       
-            # Create a mask to identify valid positions
-            valid_mask = jnp.logical_and(
-                jnp.logical_and(jnp.not_equal(tile_labels, 0), jnp.not_equal(color_labels, 0)),
-                jnp.logical_and(jnp.not_equal(tile_labels, 1), jnp.not_equal(tile_labels, 2))
-            )
-        
-            # Get class_indices and corresponding label vectors
-            class_indices = tile_color_to_class_index_array[tile_labels, color_labels]
-        
-            # Create position indices for valid positions
-            position_indices = jnp.arange(H * W).reshape(H, W) 
-
-       
-            binding_vectors = jnp.where(
-                valid_mask[..., None],
-                pre_bind_check_table[class_indices, position_indices],
-                jnp.zeros((H, W, ssp_grid.shape[1]))
-            )
-            
-
-
-
-            # Accumulate binding vectors from all valid positions
-            carry = carry + binding_vectors.sum(axis=(0, 1))  # [ssp_dim]
-
-            return carry, carry  # Return carry as the result to store SSP vector for each time step
-
-        
-        final_carry, ssp_vectors = jax.lax.scan(
-            process_single_time_step, 
-            init_carry, 
-            batch_inputs
-        )
-        # ssp_vectors = ssp_vectors.reshape((S, ssp_dim))     
-        return ssp_vectors  # Return [S, ssp_dim] instead of the accumulated vector
-
-    
-    global_env_ssp = jax.vmap(process_single_batch)(inputs)  # [B, S, ssp_dim]
-   
-    return global_env_ssp
-
-
-ssp_encoder = jax.jit(ssp_encoder)
-
-def return_ssp_encoder():
-    return ssp_encoder
