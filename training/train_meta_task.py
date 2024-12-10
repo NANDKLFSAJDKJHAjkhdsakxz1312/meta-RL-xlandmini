@@ -51,154 +51,13 @@ class TrainState(TrainState):
     dr_last_level_batch: chex.ArrayTree = struct.field(pytree_node=True)
     replay_last_level_batch: chex.ArrayTree = struct.field(pytree_node=True)
     mutation_last_level_batch: chex.ArrayTree = struct.field(pytree_node=True)
-########
-######
-# sampled_level = None 
-# ########
-
-# ##############
-# import jax
-# import jax.numpy as jnp
-# import numpy as np
-# from ordered_set import OrderedSet
-
-# class LevelSampler:
-#     def __init__(self, rng, total_levels, values, rewards):
-#         self.rng = rng
-#         self.prob_new_level = 0.5
-#         self.total_levels = total_levels
-#         self.seen_levels = []
-#         self.scores = jnp.zeros(total_levels)  # 初始化为全0的JAX数组
-#         self.timestamps = jnp.zeros(total_levels)  # 同样初始化为全0的JAX数组
-#         self.count = 0
-#         self.prob_c = jnp.zeros(total_levels)  # 初始化为全0的JAX数组
-#         self.prob_s = jnp.zeros(total_levels)  # 初始化为全0的JAX数组
-#         self.rou = 0.5
-#         self.gamma = 0.99
-#         self.lamda = 0.95
-#         self.temperature = 1.0
-#         self.values = jnp.array(values)  # 将输入的values转换为JAX数组
-#         self.rewards = jnp.array(rewards)  # 将输入的rewards转换为JAX数组
-
-
-#     def sample_replay_decision(self):
-#         rng, sub_rng = jax.random.split(self.rng)
-        
-#         # 检查 RNG 状态
-        
-
-#         # 生成 decision 并打印
-#         decision = jax.random.bernoulli(sub_rng, 0.5)
-        
-
-#         self.count += 1
-#         return decision
-    
-#     def sample_new_level(self):
-#         rng, sub_rng = jax.random.split(self.rng)
-#         unseen_levels = jnp.array([l for l in range(self.total_levels) if l not in self.seen_levels])
-#         new_level = jax.random.choice(sub_rng, unseen_levels)
-#         # new_scores = self.scores.at[new_level].set(0)
-#         # new_timestamps = self.timestamps.at[new_level].set(0)
-#         # new_seen_levels = self.seen_levels.append(new_level)
-#         return new_level
-#     def sample_replay_level(self):
-#         rng, sub_rng = jax.random.split(self.rng)
-#         priorities = self.calculate_priorities()
-#         seen_levels_array = jnp.array(list(self.seen_levels))
-#         replay_level = jax.random.choice(sub_rng, seen_levels_array, p=priorities)
-#         return replay_level
-    
-#     def calculate_priorities(self):
-#         timestamp_values = self.timestamps[jnp.array(list(self.seen_levels))] 
-#         total_staleness = jnp.sum(self.count - timestamp_values)
-        
-#         self.prob_c = (self.count - self.timestamps[list(self.seen_levels)]) / total_staleness
-#         priorities = self.rou * self.prob_c + (1 - self.rou) * self.prob_s[list(self.seen_levels)]
-#         return priorities
-
-#     def calculate_td_error(self):
-#         td_errors = self.rewards + self.gamma * self.values[1:] - self.values[:-1]
-#         return td_errors
-    
-#     def calculate_score(self):
-#         T = len(self.rewards)
-#         td_errors = self.calculate_td_error()
-#         gae = jnp.zeros(T)
-#         for t in range(T):
-#             gae_t = jnp.sum((self.gamma * self.lamda) ** (jnp.arange(t, T) - t) * td_errors[t:])
-#             gae = gae.at[t].set(gae_t)
-#         score = jnp.mean(jnp.abs(gae))
-#         return score
-    
-#     def rank_prioritization(self, scores):
-#         sorted_indices = jnp.argsort(-scores)
-#         ranks = jnp.zeros_like(scores)
-#         ranks = ranks.at[sorted_indices].set(jnp.arange(1, len(scores) + 1))
-#         h = 1 / ranks
-#         h = h ** (1 / self.temperature)
-#         self.prob_s = h / jnp.sum(h)
-#         return self.prob_s
-#     jax.config.update('jax_disable_jit', True)
-#     def sample(self):
-#         jax.debug.print("index: ")
-#         decision = self.sample_replay_decision()
-#         unseen_levels = jnp.array([l for l in range(self.total_levels) if l not in self.seen_levels])
-#         seen_levels_count = len(self.seen_levels)
-#         threshold = 10  # 设置阈值
-#         can_replay = (seen_levels_count >= threshold)
-#         unseen_levels_nonempty = (len(unseen_levels) > 0)
-
-#         # 计算 switch 的索引值
-#         index = (decision << 2) | (can_replay << 1) | unseen_levels_nonempty
-#         jax.debug.print("index: {}", index)
-#         print("index: {}", index)
-#         # 定义各个有效分支的函数
-#         def case_001(_):  # decision=0, len(unseen_levels)>0, can_replay=False
-#             return self.sample_new_level()
-
-#         print(f'index value:{index}')
-    
-#         print("asd")
-#         print("asd")
-#         def case_011(_):  # decision=0, len(unseen_levels)>0, can_replay=True
-#             return self.sample_new_level()
-
-#         def case_010(_):  # decision=0, len(unseen_levels)=0, can_replay=True
-#             return self.sample_replay_level()
-
-#         def case_110(_):  # decision=1, len(unseen_levels)=0, can_replay=True
-#             return self.sample_replay_level()
-
-#         def case_111(_):  # decision=1, len(unseen_levels)>0, can_replay=True
-#             return self.sample_replay_level()
-
-#         def case_101(_):  # decision=1, len(unseen_levels)>0, can_replay=False
-#             return self.sample_new_level()
-
-#         def default_case(_):
-#             raise ValueError("Invalid condition combination")
-
-#         # 使用 jax.lax.switch 选择执行哪个函数
-#         sampled_level = jax.lax.switch(
-#             index,
-#             [default_case, case_001, case_010, case_011, default_case, case_101, case_110, case_111],
-#             operand=None
-#         )
-
-#         return sampled_level
-
-########        
-
-
-
 
 
 @dataclass
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "global_topdown"
+    name: str = "local_cnn"
     env_id: str = "XLand-MiniGrid-R1-9x9"
     benchmark_id: str = "trivial-1m"
     img_obs: bool = False 
@@ -208,10 +67,12 @@ class TrainConfig:
     rnn_hidden_dim: int = 1024
     rnn_num_layers: int = 1
     head_hidden_dim: int = 256
+    rule_emb_dim: int = 8
+    goal_emb_dim: int = 8
     # training
     enable_bf16: bool = False
-    num_envs: int = 2048
-    num_steps_per_env: int = 4096
+    num_envs: int = 4096
+    num_steps_per_env: int = 2048
     num_steps_per_update: int =  32
     update_epochs: int = 1
     num_minibatches: int = 16
@@ -226,7 +87,7 @@ class TrainConfig:
     eval_num_envs: int = 512
     eval_num_episodes: int = 10
     eval_seed: int = 42
-    train_seed: int = 42
+    train_seed: int = 3
     checkpoint_path: Optional[str] = None
 ########
     replay_prob: float = 0.5
@@ -238,7 +99,6 @@ class TrainConfig:
     topk_k: int = 1
     score_function: str = "MaxMC"
 ########
-
     def __post_init__(self):
         num_devices = jax.local_device_count()
         # splitting computation across all available devices
@@ -261,10 +121,6 @@ def make_states(config: TrainConfig):
         total_inner_updates = config.num_minibatches * config.update_epochs * config.num_inner_updates
         frac = 1.0 - (count // total_inner_updates) / config.num_meta_updates
         return config.lr * frac
-
-
-    
-
 
     # setup environment
     if "XLand" not in config.env_id:
@@ -290,6 +146,8 @@ def make_states(config: TrainConfig):
 
     network = ActorCriticRNN(
         num_actions=env.num_actions(env_params),
+        rule_emb_dim=config.rule_emb_dim,
+        goal_emb_dim=config.goal_emb_dim,
         obs_emb_dim=config.obs_emb_dim,
         action_emb_dim=config.action_emb_dim,
         rnn_hidden_dim=config.rnn_hidden_dim,
@@ -300,12 +158,16 @@ def make_states(config: TrainConfig):
     )
     # [batch_size, seq_len, ...]
     shapes = env.observation_shape(env_params)
+    goal_shape = benchmark.goals.shape
+    rule_shape = benchmark.rules.shape
 
     init_obs = {
-        "obs_img": jnp.zeros((config.num_envs_per_device, 1,9,9,2)),
+        "obs_img": jnp.zeros((config.num_envs_per_device, 1,5,5,2)),
         "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"])),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
+        "rule": jnp.zeros((config.num_envs_per_device, 1,rule_shape[1],rule_shape[2]),dtype=jnp.int32),
+        "goal": jnp.zeros((config.num_envs_per_device, 1,goal_shape[1]),dtype=jnp.int32),
     }
     init_hstate = network.initialize_carry(batch_size=config.num_envs_per_device)
 
@@ -314,8 +176,7 @@ def make_states(config: TrainConfig):
         optax.clip_by_global_norm(config.max_grad_norm),
         optax.inject_hyperparams(optax.adam)(learning_rate=linear_schedule, eps=1e-8),  # eps=1e-5
     )
-
-    ########        
+     
         # get the function to generate random level_id from benchmark
     sample_random_level = make_level_generator(benchmark.num_rulesets())
     pholder_level = sample_random_level(jax.random.PRNGKey(config.train_seed))
@@ -331,7 +192,6 @@ def make_states(config: TrainConfig):
     sampler = levelsampler.initialize(pholder_level, {"max_return": -jnp.inf})
     pholder_level_batch = jax.tree_map(lambda x: jnp.array([x]).repeat(config.num_envs, axis=0), pholder_level)
     
-########
 
     train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx,
             sampler=sampler,
@@ -358,7 +218,7 @@ def make_train(
         train_state: TrainState,
         init_hstate: jax.Array,
     ):
-########        
+        
         level_sampler = LevelSampler(
         capacity=20480,
         replay_prob=config.replay_prob,
@@ -372,7 +232,7 @@ def make_train(
         # pholder_level = sample_random_level(jax.random.PRNGKey(0))
         # sampler = level_sampler.initialize(pholder_level, {"max_return": -jnp.inf})
 
-########        
+       
         eval_hstate = init_hstate[0][None]
 
         # META TRAIN LOOP
@@ -385,7 +245,7 @@ def make_train(
             reset_rng = jax.random.split(_rng2, num=config.num_envs_per_device)
 
             
-    ########            
+           
             def on_replay_levels(rng: chex.PRNGKey, train_state: TrainState):    
                 sampler = train_state.sampler
                 # jax.debug.print('episode1:{}',sampler['episode_count'])
@@ -401,7 +261,7 @@ def make_train(
                 # jax.debug.print('levels:{}',sampler['levels'])
                 # jax.debug.print('scores:{}',sampler['scores'])
                 # levels = jnp.array(levels)
-    ########
+
                 rulesets = jax.vmap(benchmark.get_ruleset)(levels) # change the random ruleset_rng to levels
                 meta_env_params = env_params.replace(ruleset=rulesets)
 
@@ -422,10 +282,12 @@ def make_train(
                             {
                                 # [batch_size, seq_len=1, ...]
                                 # "obs_img": prev_timestep.observation["img"][:, None],
-                                "obs_img": prev_timestep.state.grid[:, None],
+                                "obs_img": prev_timestep.observation["img"][:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
+                                "rule": prev_timestep.state.rule_encoding[:, None],
+                                "goal": prev_timestep.state.goal_encoding[:, None]
                             },
                             prev_hstate,
                         )
@@ -442,7 +304,7 @@ def make_train(
                             value=value,
                             reward=timestep.reward,
                             log_prob=log_prob,
-                            obs=prev_timestep.state.grid,
+                            obs=prev_timestep.observation["img"],
                             dir=prev_timestep.observation["direction"],
                             prev_action=prev_action,
                             prev_reward=prev_reward,
@@ -453,26 +315,18 @@ def make_train(
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
-    ############
-                    # sample_rng = jax.random.PRNGKey(2077)
-                    # values = transitions.value
-                    # rewards = transitions.reward
-                    # sampler = LevelSampler(rng=sample_rng, total_levels=benchmark.num_rulesets(), values=values, rewards=rewards)
-                    # global sampled_level
-                    # sampled_level = sampler.sample()
-
-    ############
-
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
                     # calculate value of the last step for bootstrapping
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": timestep.state.grid[:, None],
+                            "obs_img": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
+                            "rule": timestep.state.rule_encoding[:, None],
+                            "goal": timestep.state.goal_encoding[:, None]
                         },
                         hstate,
                     )
@@ -577,10 +431,12 @@ def make_train(
                            {
                             # [batch_size, seq_len=1, ...]
                             # "obs_img": prev_timestep.observation["img"][:, None],
-                            "obs_img": prev_timestep.state.grid[:, None],
+                            "obs_img": prev_timestep.observation["img"][:, None],
                             "obs_dir": prev_timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
+                            "rule": prev_timestep.state.rule_encoding[:, None],
+                            "goal": prev_timestep.state.goal_encoding[:, None]
                         },
                             prev_hstate,
                         )
@@ -597,7 +453,7 @@ def make_train(
                         value=value,
                         reward=timestep.reward,
                         log_prob=log_prob,
-                        obs=prev_timestep.state.grid,
+                        obs=prev_timestep.observation["img"],
                         dir=prev_timestep.observation["direction"],
                         prev_action=prev_action,
                         prev_reward=prev_reward,
@@ -608,31 +464,22 @@ def make_train(
                     initial_hstate = runner_state[-1]
                     # transitions: [seq_len, batch_size, ...]
                     runner_state, transitions = jax.lax.scan(_env_step, runner_state, None, config.num_steps_per_update)
-    ############
-                    # sample_rng = jax.random.PRNGKey(2077)
-                    # values = transitions.value
-                    # rewards = transitions.reward
-                    # sampler = LevelSampler(rng=sample_rng, total_levels=benchmark.num_rulesets(), values=values, rewards=rewards)
-                    # global sampled_level
-                    # sampled_level = sampler.sample()
-
-    ############
-
                     # CALCULATE ADVANTAGE
                     rng, train_state, timestep, prev_action, prev_reward, hstate = runner_state
                     # calculate value of the last step for bootstrapping
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": timestep.state.grid[:, None],
+                            "obs_img": timestep.observation["img"][:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
+                            "rule": timestep.state.rule_encoding[:, None],
+                            "goal": timestep.state.goal_encoding[:, None]
                         },
                         hstate,
                     )
-                    advantages, targets = calculate_gae(transitions, last_val.squeeze(1), config.gamma, config.gae_lambda)
-    ########        
+                    advantages, targets = calculate_gae(transitions, last_val.squeeze(1), config.gamma, config.gae_lambda)      
                     # jax.debug.print('shape_of_ad:{}',advantages.shape)
                     sampler = train_state.sampler
                     max_returns = compute_max_returns(transitions.done, transitions.reward)
@@ -739,11 +586,11 @@ def make_train(
 
             # averaging over inner updates, adding evaluation metrics
             loss_info = jtu.tree_map(lambda x: x.mean(-1), loss_info)
-            idx = jnp.arange(level_sampler.capacity) < train_state.sampler["size"]  # 判断哪些关卡已填充
-            mean_score = (train_state.sampler["scores"] * idx).sum() / idx.sum()  # 只对已填充的关卡求均值
+            idx = jnp.arange(level_sampler.capacity) < train_state.sampler["size"]  
+            mean_score = (train_state.sampler["scores"] * idx).sum() / idx.sum()  
 
-            weights = level_sampler.level_weights(train_state.sampler)  # 获取每个关卡的权重
-            weighted_score = (train_state.sampler["scores"] * weights).sum()  # 计算加权分数的总和
+            weights = level_sampler.level_weights(train_state.sampler)  
+            weighted_score = (train_state.sampler["scores"] * weights).sum()  
             loss_info.update(
                 {
                     "eval/returns_mean": eval_stats.reward.mean(0),
@@ -783,19 +630,6 @@ def make_train(
 
 @pyrallis.wrap()
 def train(config: TrainConfig):
-    
-    
-    # level_sampler = LevelSampler(
-    #     capacity=config["level_buffer_capacity"],
-    #     replay_prob=config["replay_prob"],
-    #     staleness_coeff=config["staleness_coeff"],
-    #     minimum_fill_ratio=config["minimum_fill_ratio"],
-    #     prioritization=config["prioritization"],
-    #     prioritization_params={"temperature": config["temperature"], "k": config['topk_k']},
-    #     duplicate_check=config['buffer_duplicate_check'],
-    # )
-
-
     # logging to wandb
 
     run = wandb.init(
@@ -833,37 +667,19 @@ def train(config: TrainConfig):
     levels_info = train_info["levels"]
 
     scores_info = train_info["scores"]
-    size_info = train_info["size"]
-    timestamps_info = train_info["timestamps"]
     episodecount_info = train_info["episode_count"]
     num_dr_info = train_info['num_dr']
     num_replay_info = train_info['num_replay']
-    levels_dr_info = train_info['levels_dr']
-########    
-    # logging.basicConfig(filename='/home/jiangnan/new_xlandmini/xland-minigrid/training/levels_scores.log', level=logging.INFO, 
-    #                 format='%(asctime)s - %(message)s')
-    # logging.info(f'Levels: {levels_info}')
-    # logging.info(f'Scores: {scores_info}')
-    # logging.info("finished logging")
-    # print("levels_info:",levels_info)
-    # print('levels_info:',levels_info)
     print('num_replay:',num_replay_info)
     print('num_dr:',num_dr_info)
-    print('episode:',episodecount_info)
-    # print('levels_dr:',levels_dr_info)
-    # print('shape of levels_dr:',levels_dr_info.shape)
-########    
+    print('episode:',episodecount_info) 
     wandb.log({"levels_info": levels_info.tolist()})
     wandb.log({'socres_info':scores_info.tolist()})
     total_transitions = 0
     for i in range(config.num_meta_updates):
         total_transitions += config.num_steps_per_env * config.num_envs_per_device * jax.local_device_count()
         info = jtu.tree_map(lambda x: x[i].item(), loss_info)
-        levels = levels_info.tolist()
-        scores = scores_info.tolist()
         info["transitions"] = total_transitions
-        # info["levels"] = levels
-        # info["scores"] = scores
         
         wandb.log(info)
     

@@ -13,7 +13,8 @@ from flax.linen.initializers import glorot_normal, orthogonal, zeros_init
 from flax.typing import Dtype
 
 from xminigrid.core.constants import NUM_COLORS, NUM_TILES
-
+from xminigrid.core.rules import NUM_RULES
+from xminigrid.core.goals import NUM_GOALS
 
 class GRU(nn.Module):
     hidden_dim: int
@@ -92,6 +93,57 @@ class EmbeddingEncoder(nn.Module):
         )
         return img_emb
 
+class GoalEncoder(nn.Module):
+    emb_dim: int = 16
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, rules):
+        goal_id_emb = nn.Embed(NUM_GOALS, self.emb_dim, self.dtype, self.param_dtype)
+        goal_tile_emb = nn.Embed(NUM_TILES, self.emb_dim, self.dtype, self.param_dtype)
+        goal_color_emb = nn.Embed(NUM_COLORS, self.emb_dim, self.dtype, self.param_dtype)
+
+        # [..., channels]
+        goal_emb = jnp.concatenate(
+            [
+                goal_id_emb(rules[..., 0]),
+                goal_tile_emb(rules[..., 1]),
+                goal_color_emb(rules[..., 2]),
+                goal_tile_emb(rules[..., 3]),
+                goal_color_emb(rules[..., 4]),
+            ],
+            axis=-1,
+        )
+        return goal_emb
+    
+class RuleEncoder(nn.Module):
+    emb_dim: int = 16
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, rules):
+        rule_id_emb = nn.Embed(NUM_RULES, self.emb_dim, self.dtype, self.param_dtype)
+        rule_tile_emb = nn.Embed(NUM_TILES, self.emb_dim, self.dtype, self.param_dtype)
+        rule_color_emb = nn.Embed(NUM_COLORS, self.emb_dim, self.dtype, self.param_dtype)
+
+        # [..., channels]
+        rule_emb = jnp.concatenate(
+            [
+                rule_id_emb(rules[..., 0]),
+                rule_tile_emb(rules[..., 1]),
+                rule_color_emb(rules[..., 2]),
+                rule_tile_emb(rules[..., 3]),
+                rule_color_emb(rules[..., 4]),
+                rule_tile_emb(rules[..., 5]),
+                rule_color_emb(rules[..., 6]),
+            ],
+            axis=-1,
+        )
+        B, S = rules.shape[:2]
+        rule_emb = rule_emb.reshape(B, S, -1)
+        return rule_emb
 
 class ActorCriticInput(TypedDict):
     obs_img: jax.Array
@@ -102,6 +154,8 @@ class ActorCriticInput(TypedDict):
 
 class ActorCriticRNN(nn.Module):
     num_actions: int
+    rule_emb_dim: int = 64
+    goal_emb_dim: int = 16
     obs_emb_dim: int = 16
     action_emb_dim: int = 16
     rnn_hidden_dim: int = 64
@@ -196,7 +250,8 @@ class ActorCriticRNN(nn.Module):
             )
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
         direction_encoder = nn.Dense(self.action_emb_dim, dtype=self.dtype, param_dtype=self.param_dtype)
-
+        rule_encoder = nn.Dense(self.rule_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
+        goal_encoder = nn.Dense(self.goal_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
         rnn_core = BatchedRNNModel(
             self.rnn_hidden_dim, self.rnn_num_layers, dtype=self.dtype, param_dtype=self.param_dtype
         )
