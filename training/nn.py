@@ -93,30 +93,6 @@ class EmbeddingEncoder(nn.Module):
         )
         return img_emb
 
-class GoalEncoder(nn.Module):
-    emb_dim: int = 16
-    dtype: Optional[Dtype] = None
-    param_dtype: Dtype = jnp.float32
-
-    @nn.compact
-    def __call__(self, rules):
-        goal_id_emb = nn.Embed(NUM_GOALS, self.emb_dim, self.dtype, self.param_dtype)
-        goal_tile_emb = nn.Embed(NUM_TILES, self.emb_dim, self.dtype, self.param_dtype)
-        goal_color_emb = nn.Embed(NUM_COLORS, self.emb_dim, self.dtype, self.param_dtype)
-
-        # [..., channels]
-        goal_emb = jnp.concatenate(
-            [
-                goal_id_emb(rules[..., 0]),
-                goal_tile_emb(rules[..., 1]),
-                goal_color_emb(rules[..., 2]),
-                goal_tile_emb(rules[..., 3]),
-                goal_color_emb(rules[..., 4]),
-            ],
-            axis=-1,
-        )
-        return goal_emb
-    
 class RuleEncoder(nn.Module):
     emb_dim: int = 16
     dtype: Optional[Dtype] = None
@@ -144,6 +120,30 @@ class RuleEncoder(nn.Module):
         B, S = rules.shape[:2]
         rule_emb = rule_emb.reshape(B, S, -1)
         return rule_emb
+    
+class GoalEncoder(nn.Module):
+    emb_dim: int = 16
+    dtype: Optional[Dtype] = None
+    param_dtype: Dtype = jnp.float32
+
+    @nn.compact
+    def __call__(self, rules):
+        goal_id_emb = nn.Embed(NUM_GOALS, self.emb_dim, self.dtype, self.param_dtype)
+        goal_tile_emb = nn.Embed(NUM_TILES, self.emb_dim, self.dtype, self.param_dtype)
+        goal_color_emb = nn.Embed(NUM_COLORS, self.emb_dim, self.dtype, self.param_dtype)
+
+        # [..., channels]
+        goal_emb = jnp.concatenate(
+            [
+                goal_id_emb(rules[..., 0]),
+                goal_tile_emb(rules[..., 1]),
+                goal_color_emb(rules[..., 2]),
+                goal_tile_emb(rules[..., 3]),
+                goal_color_emb(rules[..., 4]),
+            ],
+            axis=-1,
+        )
+        return goal_emb
 
 class ActorCriticInput(TypedDict):
     obs_img: jax.Array
@@ -250,8 +250,12 @@ class ActorCriticRNN(nn.Module):
             )
         action_encoder = nn.Embed(self.num_actions, self.action_emb_dim)
         direction_encoder = nn.Dense(self.action_emb_dim, dtype=self.dtype, param_dtype=self.param_dtype)
-        rule_encoder = nn.Dense(self.rule_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
-        goal_encoder = nn.Dense(self.goal_emb_dim,dtype=self.dtype, param_dtype=self.param_dtype)
+        rule_encoder = RuleEncoder(self.rule_emb_dim)
+        
+        
+        goal_encoder = GoalEncoder(self.goal_emb_dim)
+        
+
         rnn_core = BatchedRNNModel(
             self.rnn_hidden_dim, self.rnn_num_layers, dtype=self.dtype, param_dtype=self.param_dtype
         )
@@ -280,8 +284,10 @@ class ActorCriticRNN(nn.Module):
         obs_emb = img_encoder(inputs["obs_img"].astype(jnp.int32)).reshape(B, S, -1)
         dir_emb = direction_encoder(inputs["obs_dir"])
         act_emb = action_encoder(inputs["prev_action"])
+        rule_emb = rule_encoder(inputs["rule"])
+        goal_emb = goal_encoder(inputs["goal"])
         # [batch_size, seq_len, hidden_dim + 2 * act_emb_dim + 1]
-        out = jnp.concatenate([obs_emb, dir_emb, act_emb, inputs["prev_reward"][..., None]], axis=-1)
+        out = jnp.concatenate([obs_emb, dir_emb, act_emb, inputs["prev_reward"][..., None],rule_emb,goal_emb], axis=-1)
 
         # core networks
         out, new_hidden = rnn_core(out, hidden)
