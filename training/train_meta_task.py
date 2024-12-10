@@ -57,9 +57,9 @@ class TrainState(TrainState):
 class TrainConfig:
     project: str = "xminigrid"
     group: str = "default"
-    name: str = "local_cnn"
+    name: str = "topdown_cnn_final"
     env_id: str = "XLand-MiniGrid-R1-9x9"
-    benchmark_id: str = "trivial-1m"
+    benchmark_id: str = "high-1m"
     img_obs: bool = False 
     # agent
     obs_emb_dim: int = 16
@@ -162,7 +162,7 @@ def make_states(config: TrainConfig):
     rule_shape = benchmark.rules.shape
 
     init_obs = {
-        "obs_img": jnp.zeros((config.num_envs_per_device, 1,5,5,2)),
+        "obs_img": jnp.zeros((config.num_envs_per_device, 1,9,9,2)),
         "obs_dir": jnp.zeros((config.num_envs_per_device, 1, shapes["direction"])),
         "prev_action": jnp.zeros((config.num_envs_per_device, 1), dtype=jnp.int32),
         "prev_reward": jnp.zeros((config.num_envs_per_device, 1)),
@@ -282,7 +282,7 @@ def make_train(
                             {
                                 # [batch_size, seq_len=1, ...]
                                 # "obs_img": prev_timestep.observation["img"][:, None],
-                                "obs_img": prev_timestep.observation["img"][:, None],
+                                "obs_img": prev_timestep.state.grid[:, None],
                                 "obs_dir": prev_timestep.observation["direction"][:, None],
                                 "prev_action": prev_action[:, None],
                                 "prev_reward": prev_reward[:, None],
@@ -304,8 +304,10 @@ def make_train(
                             value=value,
                             reward=timestep.reward,
                             log_prob=log_prob,
-                            obs=prev_timestep.observation["img"],
+                            obs=prev_timestep.state.grid,
                             dir=prev_timestep.observation["direction"],
+                            rule=prev_timestep.state.rule_encoding,
+                            goal=prev_timestep.state.goal_encoding,
                             prev_action=prev_action,
                             prev_reward=prev_reward,
                         )
@@ -321,7 +323,7 @@ def make_train(
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": timestep.observation["img"][:, None],
+                            "obs_img": timestep.state.grid[:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
@@ -431,7 +433,7 @@ def make_train(
                            {
                             # [batch_size, seq_len=1, ...]
                             # "obs_img": prev_timestep.observation["img"][:, None],
-                            "obs_img": prev_timestep.observation["img"][:, None],
+                            "obs_img": prev_timestep.state.grid[:, None],
                             "obs_dir": prev_timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],
@@ -453,8 +455,10 @@ def make_train(
                         value=value,
                         reward=timestep.reward,
                         log_prob=log_prob,
-                        obs=prev_timestep.observation["img"],
+                        obs=prev_timestep.state.grid,
                         dir=prev_timestep.observation["direction"],
+                        rule=prev_timestep.state.rule_encoding,
+                        goal=prev_timestep.state.goal_encoding,
                         prev_action=prev_action,
                         prev_reward=prev_reward,
                     )
@@ -470,7 +474,7 @@ def make_train(
                     _, last_val, _ = train_state.apply_fn(
                         train_state.params,
                         {
-                            "obs_img": timestep.observation["img"][:, None],
+                            "obs_img": timestep.state.grid[:, None],
                             "obs_dir": timestep.observation["direction"][:, None],
                             "prev_action": prev_action[:, None],
                             "prev_reward": prev_reward[:, None],

@@ -17,6 +17,8 @@ class Transition(struct.PyTreeNode):
     # for obs
     obs: jax.Array
     dir: jax.Array
+    rule: jax.Array
+    goal: jax.Array
     # for rnn policy
     prev_action: jax.Array
     prev_reward: jax.Array
@@ -68,6 +70,8 @@ def ppo_update_networks(
                 "obs_dir": transitions.dir,
                 "prev_action": transitions.prev_action,
                 "prev_reward": transitions.prev_reward,
+                "rule": transitions.rule,
+                "goal": transitions.goal
             },
             init_hstate,
         )
@@ -131,10 +135,13 @@ def rollout(
         dist, _, hstate = train_state.apply_fn(
             train_state.params,
             {
-                "obs_img": timestep.observation["img"][None, None, ...],
+                "obs_img": timestep.state.grid[None, None, ...],
                 "obs_dir": timestep.observation["direction"][None, None, ...],
                 "prev_action": prev_action[None, None, ...],
                 "prev_reward": prev_reward[None, None, ...],
+                "rule": timestep.state.rule_encoding[None, None, ...],
+                "goal": timestep.state.goal_encoding[None, None, ...],
+
             },
             hstate,
         )

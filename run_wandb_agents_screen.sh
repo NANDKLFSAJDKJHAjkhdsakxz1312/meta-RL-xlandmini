@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 参数配置
-SWEEP_ID="jn1473733091/xminigrid/xbfu985g"  # 替换为你的实际 sweep_id
-GPUS_TO_USE=( 3 4 5 7  )  # 指定要使用的 GPU 编号
+SWEEP_ID="jn1473733091/xminigrid/16p60a7q"  # 替换为你的实际 sweep_id
+GPUS_TO_USE=( 4 5 6 7  )  # 指定要使用的 GPU 编号
 AGENTS_PER_GPU=1  # 每个 GPU 上运行的 wandb agent 数量
 VENV_PATH="/opt/anaconda3/envs/jax_xland"  # 虚拟环境路径
 
